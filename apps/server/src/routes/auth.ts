@@ -1,0 +1,154 @@
+import { randomBytes } from 'node:crypto';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import { z } from 'zod';
+import {
+  clearSessionCookie,
+  createSession,
+  deleteExpiredSessions,
+  deleteSession,
+  getSessionUser,
+  hashPassword,
+  initializeAdmin,
+  mapUser,
+  requireUser,
+  setSessionCookie,
+  verifyPassword,
+  type UserRow,
+} from '../auth.js';
+import type { AppConfig } from '../config.js';
+import type { HubDatabase } from '../db/database.js';
+import { badRequest, conflict, forbidden, unauthorized } from '../errors.js';
+
+const usernameSchema = z.string()
+  .trim()
+  .min(3, '用户名至少 3 个字符')
+  .max(50, '用户名最多 50 个字符')
+  .regex(/^[\p{L}\p{N}_.-]+$/u, '用户名只能包含文字、数字、下划线、点和连字符');
+
+const loginSchema = z.object({
+  username: z.string().trim().min(1).max(100),
+  password: z.string().min(1).max(1024),
+});
+
+const registerSchema = z.object({
+  username: usernameSchema,
+  password: z.string().min(8, '密码至少 8 个字符').max(1024),
+});
+
+const userSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  role: z.enum(['admin', 'user']),
+  isEnabled: z.boolean(),
+  permissions: z.object({
+    read: z.boolean(),
+    upload: z.boolean(),
+    edit: z.boolean(),
+  }),
+  createdAt: z.string(),
+});
+
+const sessionSchema = z.object({
+  user: userSchema,
+  expiresAt: z.string(),
+});
+
+interface RouteContext {
+  config: AppConfig;
+  db: HubDatabase;
+}
+
+function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
+  const result = schema.safeParse(value);
+  if (!result.success) throw badRequest(message, result.error.flatten());
+  return result.data;
+}
+
+function findLoginUser(context: RouteContext, username: string): (UserRow & { password_hash: string }) | undefined {
+  return context.db.sqlite.prepare(
+    `SELECT id, username, password_hash, role, is_enabled,
+            can_read, can_upload, can_edit, created_at
+     FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
+  ).get(username) as (UserRow & { password_hash: string }) | undefined;
+}
+
+function startSession(context: RouteContext, reply: FastifyReply, user: UserRow) {
+  const session = createSession(
+    context.db.sqlite,
+    user.id,
+    context.config.sessionTtlMs,
+  );
+  setSessionCookie(reply, session.token, context.config);
+  return sessionSchema.parse({ user: mapUser(user), expiresAt: session.expiresAt });
+}
+
+export function registerAuthRoutes(app: FastifyInstance, context: RouteContext): void {
+  initializeAdmin(context.db.sqlite, context.config);
+  deleteExpiredSessions(context.db.sqlite);
+
+  app.post('/api/auth/register', async (request, reply) => {
+    const input = parseOrThrow(registerSchema, request.body, '注册参数无效');
+    if (findLoginUser(context, input.username)) throw conflict('该用户名已被使用');
+
+    const user: UserRow = {
+      id: randomBytes(16).toString('hex'),
+      username: input.username,
+      role: 'user',
+      is_enabled: 1,
+      can_read: 0,
+      can_upload: 0,
+      can_edit: 0,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      context.db.sqlite.prepare(
+        `INSERT INTO users
+          (id, username, password_hash, role, is_enabled, can_read, can_upload, can_edit, created_at)
+         VALUES (?, ?, ?, 'user', 1, 0, 0, 0, ?)`,
+      ).run(user.id, user.username, hashPassword(input.password), user.created_at);
+    } catch (error) {
+      if (String((error as { code?: string }).code).startsWith('SQLITE_CONSTRAINT')) {
+        throw conflict('该用户名已被使用');
+      }
+      throw error;
+    }
+
+    return reply.code(201).send(startSession(context, reply, user));
+  });
+
+  app.post('/api/auth/login', async (request, reply) => {
+    const input = parseOrThrow(loginSchema, request.body, '登录参数无效');
+    const user = findLoginUser(context, input.username);
+
+    if (!user || !verifyPassword(input.password, user.password_hash)) {
+      throw unauthorized('用户名或密码错误');
+    }
+    if (!user.is_enabled) throw forbidden('账号已被管理员停用');
+
+    return startSession(context, reply, user);
+  });
+
+  app.post('/api/auth/logout', async (request, reply) => {
+    deleteSession(context.db.sqlite, request.cookies?.lfh_session);
+    clearSessionCookie(reply, context.config);
+    return { ok: true };
+  });
+
+  app.get('/api/auth/session', async (request) => {
+    const user = await getSessionUser(context.db.sqlite, request);
+    if (!user) throw unauthorized();
+    return { user };
+  });
+
+  app.get('/api/auth/me', async (request) => {
+    const user = await requireUser(context.db.sqlite, request);
+    return { user };
+  });
+
+  app.get('/api/auth/ping', async (request) => {
+    const user = await requireUser(context.db.sqlite, request);
+    return { ok: true, user: user.username };
+  });
+}
+
+export type { RouteContext as AuthRouteContext };

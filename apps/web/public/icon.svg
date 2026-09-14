@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="柯影文件站">
+  <rect width="512" height="512" rx="120" fill="#173f35"/>
+  <path d="M112 164c0-22 18-40 40-40h84l38 44h86c22 0 40 18 40 40v154c0 22-18 40-40 40H152c-22 0-40-18-40-40V164Z" fill="#f5c267"/>
+  <path d="M146 214h220v132H146z" fill="#f8f5ed"/>
+  <path d="M180 258h152M180 302h112" stroke="#173f35" stroke-width="22" stroke-linecap="round"/>
+</svg>

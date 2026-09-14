@@ -1,0 +1,11 @@
+node_modules/
+.npm-cache/
+dist/
+apps/web/dev-dist/
+data/
+apps/server/data/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
