@@ -20,7 +20,11 @@ const queryClient = new QueryClient({
   },
 });
 
-registerSW({ immediate: true });
+// 仅在生产构建中注册 PWA Service Worker；
+// dev 模式注册 SW 会与 HMR 冲突并可能触发页面自动刷新
+if (import.meta.env.PROD) {
+  registerSW({ immediate: true });
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -49,6 +49,7 @@ export interface AuthUser {
     edit: boolean;
   };
   createdAt: string;
+  lastLoginAt: string | null;
 }
 
 export interface SessionResponse {
@@ -63,6 +64,31 @@ export interface UsersResponse {
 export interface UserAccessUpdate {
   isEnabled?: boolean;
   permissions?: AuthUser['permissions'];
+}
+
+export interface UserDetailsResponse {
+  user: AuthUser;
+  stats: {
+    activeSessionCount: number;
+    globalFileCount: number;
+    globalTotalBytes: number;
+  };
+}
+
+export interface CreateUserInput {
+  username: string;
+  password: string;
+  isEnabled: boolean;
+  permissions: AuthUser['permissions'];
+}
+
+export interface ResetPasswordInput {
+  newPassword: string;
+}
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
 }
 
 export interface UploadProgress {

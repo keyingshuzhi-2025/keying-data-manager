@@ -8,8 +8,10 @@ import {
   deleteSession,
   getSessionUser,
   hashPassword,
+  hashSessionToken,
   initializeAdmin,
   mapUser,
+  recordLastLogin,
   requireUser,
   setSessionCookie,
   verifyPassword,
@@ -46,11 +48,17 @@ const userSchema = z.object({
     edit: z.boolean(),
   }),
   createdAt: z.string(),
+  lastLoginAt: z.string().nullable(),
 });
 
 const sessionSchema = z.object({
   user: userSchema,
   expiresAt: z.string(),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(1024),
+  newPassword: z.string().min(8, '新密码至少 8 个字符').max(1024),
 });
 
 interface RouteContext {
@@ -67,7 +75,7 @@ function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string):
 function findLoginUser(context: RouteContext, username: string): (UserRow & { password_hash: string }) | undefined {
   return context.db.sqlite.prepare(
     `SELECT id, username, password_hash, role, is_enabled,
-            can_read, can_upload, can_edit, created_at
+            can_read, can_upload, can_edit, created_at, last_login_at
      FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).get(username) as (UserRow & { password_hash: string }) | undefined;
 }
@@ -99,6 +107,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
       can_upload: 0,
       can_edit: 0,
       created_at: new Date().toISOString(),
+      last_login_at: null,
     };
     try {
       context.db.sqlite.prepare(
@@ -125,13 +134,37 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
     }
     if (!user.is_enabled) throw forbidden('账号已被管理员停用');
 
-    return startSession(context, reply, user);
+    const session = startSession(context, reply, user);
+    recordLastLogin(context.db.sqlite, user.id);
+    return session;
   });
 
   app.post('/api/auth/logout', async (request, reply) => {
     deleteSession(context.db.sqlite, request.cookies?.lfh_session);
     clearSessionCookie(reply, context.config);
     return { ok: true };
+  });
+
+  app.post('/api/auth/password', async (request, reply) => {
+    const current = await requireUser(context.db.sqlite, request);
+    const input = parseOrThrow(changePasswordSchema, request.body, '修改密码参数无效');
+    const row = context.db.sqlite.prepare(
+      'SELECT password_hash FROM users WHERE id = ? LIMIT 1',
+    ).get(current.id) as { password_hash: string } | undefined;
+    if (!row || !verifyPassword(input.currentPassword, row.password_hash)) {
+      throw unauthorized('当前密码不正确');
+    }
+    if (input.currentPassword === input.newPassword) {
+      throw badRequest('新密码不能与当前密码相同');
+    }
+    context.db.sqlite.prepare(
+      'UPDATE users SET password_hash = ? WHERE id = ?',
+    ).run(hashPassword(input.newPassword), current.id);
+    // 主动结束其他会话，强制除当前外的所有设备重新登录
+    context.db.sqlite.prepare(
+      `DELETE FROM sessions WHERE user_id = ? AND token_hash != ?`,
+    ).run(current.id, hashSessionToken(request.cookies?.lfh_session ?? ''));
+    return reply.send({ ok: true });
   });
 
   app.get('/api/auth/session', async (request) => {

@@ -2,8 +2,9 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { destination as pinoDestination } from 'pino';
 import { ZodError } from 'zod';
 import { loadConfig, type AppConfig } from './config.js';
 import { HubDatabase } from './db/database.js';
@@ -22,13 +23,24 @@ export interface HubApp {
   files: FileService;
 }
 
+/** 创建写入指定文件的 pino 日志流（自动创建目录） */
+function createLogStream(filePath: string) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  return pinoDestination(filePath);
+}
+
 export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp> {
   const db = new HubDatabase(config.dbPath);
   const storage = new LocalObjectStorage(config.objectDir, config.uploadDir);
   const files = new FileService(db.sqlite, storage);
   const trustProxy = config.trustProxy;
+  const loggerOptions = config.logLevel === 'silent'
+    ? false
+    : config.logFile === undefined
+      ? { level: config.logLevel }
+      : { level: config.logLevel, stream: createLogStream(config.logFile) };
   const app = Fastify({
-    logger: config.logLevel === 'silent' ? false : { level: config.logLevel },
+    logger: loggerOptions,
     bodyLimit: config.maxUploadBytes + 1024 * 1024,
     trustProxy: typeof trustProxy === 'number'
       ? (_address, hop) => hop < trustProxy

@@ -13,6 +13,7 @@ import {
   FolderLock,
   FolderOpen,
   HardDrive,
+  KeyRound,
   LoaderCircle,
   LogOut,
   RefreshCw,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react';
 import { ApiError, api, uploadFile } from '../../api/client';
 import { Toast, type ToastMessage } from '../../components/Toast';
+import { ChangePasswordDialog } from '../auth/ChangePasswordDialog';
 import { UserManagementDialog } from '../admin/UserManagementDialog';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import type { AuthUser, FileRecord, FileType, SortField, SortOrder } from '../../types';
@@ -95,6 +97,7 @@ export function FilesPage({
   const [isUploading, setIsUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [showUserManagement, setShowUserManagement] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const showToast = useCallback((text: string, tone: ToastMessage['tone'] = 'success') => {
     setToast({ id: Date.now(), text, tone });
@@ -334,6 +337,9 @@ export function FilesPage({
             </button>
           ) : null}
           <div className="user-chip"><span>{user.username.slice(0, 1).toUpperCase()}</span><div><strong>{user.username}</strong><small>{user.role === 'admin' ? '管理员' : '普通用户'}</small></div></div>
+          <button className="icon-button" type="button" onClick={() => setShowChangePassword(true)} aria-label="修改密码" title="修改密码">
+            <KeyRound size={19} />
+          </button>
           <button className="icon-button" type="button" onClick={onLogout} disabled={loggingOut} aria-label="退出登录" title="退出登录">
             {loggingOut ? <LoaderCircle className="spin" size={19} /> : <LogOut size={19} />}
           </button>
@@ -449,7 +455,16 @@ export function FilesPage({
         />
       ) : null}
       {preview ? <FilePreview file={preview} onClose={() => setPreview(null)} /> : null}
-      {showUserManagement ? <UserManagementDialog onClose={() => setShowUserManagement(false)} /> : null}
+      {showUserManagement ? <UserManagementDialog currentUser={user} onClose={() => setShowUserManagement(false)} /> : null}
+      {showChangePassword ? (
+        <ChangePasswordDialog
+          onClose={() => setShowChangePassword(false)}
+          onChanged={() => {
+            setShowChangePassword(false);
+            showToast('密码已修改，其他设备已退出登录');
+          }}
+        />
+      ) : null}
       <UploadQueue tasks={uploadTasks} onRetry={(task) => void retryUpload(task as UploadTaskWithDestination)} onDismiss={() => setUploadTasks([])} />
       {toast ? <Toast message={toast} onDismiss={() => setToast(null)} /> : null}
       {mutationPending ? <span className="sr-only" role="status">正在处理操作</span> : null}

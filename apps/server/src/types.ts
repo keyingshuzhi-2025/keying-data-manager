@@ -48,6 +48,7 @@ export interface AuthUser {
     edit: boolean;
   };
   createdAt: string;
+  lastLoginAt: string | null;
 }
 
 export type UserPermission = keyof AuthUser['permissions'];

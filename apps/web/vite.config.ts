@@ -39,7 +39,9 @@ export default defineConfig({
           },
         ],
       },
-      devOptions: { enabled: true, suppressWarnings: true },
+      // dev 模式不启用 Service Worker：
+      // SW 与 Vite HMR 叠加会触发页面自动刷新，且 dev-dist 产物不应进入仓库
+      devOptions: { enabled: false },
     }),
   ],
   build: {

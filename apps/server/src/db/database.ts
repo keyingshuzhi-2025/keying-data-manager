@@ -15,7 +15,7 @@ export class HubDatabase {
     this.sqlite.pragma('busy_timeout = 5000');
     this.sqlite.exec(schema);
     this.migrateUsers();
-    this.sqlite.pragma('user_version = 2');
+    this.sqlite.pragma('user_version = 3');
   }
 
   private migrateUsers(): void {
@@ -27,6 +27,7 @@ export class HubDatabase {
       ['can_read', 'INTEGER NOT NULL DEFAULT 0'],
       ['can_upload', 'INTEGER NOT NULL DEFAULT 0'],
       ['can_edit', 'INTEGER NOT NULL DEFAULT 0'],
+      ['last_login_at', 'TEXT'],
     ] as const;
 
     for (const [name, definition] of additions) {

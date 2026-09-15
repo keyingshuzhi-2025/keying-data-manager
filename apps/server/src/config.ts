@@ -20,6 +20,7 @@ const environmentSchema = z.object({
   COOKIE_SECURE: z.string().optional(),
   TRUST_PROXY: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  LOG_FILE: z.string().min(1).optional(),
 });
 
 export type NodeEnvironment = z.infer<typeof nodeEnvironmentSchema>;
@@ -41,6 +42,7 @@ export interface AppConfig {
   cookieSecure: boolean;
   trustProxy: boolean | string | number;
   logLevel: string;
+  logFile?: string;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -98,5 +100,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecure: parseBoolean(value.COOKIE_SECURE, isProduction),
     trustProxy: parseTrustProxy(value.TRUST_PROXY),
     logLevel: value.LOG_LEVEL,
+    logFile: value.LOG_FILE === undefined ? undefined : resolve(value.LOG_FILE),
   };
 }

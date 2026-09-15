@@ -21,6 +21,7 @@ export interface UserRow {
   can_upload: number;
   can_edit: number;
   created_at: string;
+  last_login_at: string | null;
 }
 
 export interface AuthenticatedRequest extends FastifyRequest {
@@ -29,6 +30,11 @@ export interface AuthenticatedRequest extends FastifyRequest {
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+/** 对外暴露：按会话令牌生成库中存储的哈希（用于外部查询/删除） */
+export function hashSessionToken(token: string): string {
+  return hashToken(token);
 }
 
 export function mapUser(row: UserRow): AuthUser {
@@ -44,7 +50,16 @@ export function mapUser(row: UserRow): AuthUser {
       edit: isAdmin || Boolean(row.can_edit),
     },
     createdAt: row.created_at,
+    lastLoginAt: row.last_login_at,
   };
+}
+
+/** 更新指定用户的最后登录时间为当前时刻 */
+export function recordLastLogin(db: Database.Database, userId: string): void {
+  db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(
+    new Date().toISOString(),
+    userId,
+  );
 }
 
 /** Store a salted scrypt password hash in a portable text format. */
@@ -69,7 +84,7 @@ export function verifyPassword(password: string, encoded: string): boolean {
 
 export function initializeAdmin(db: Database.Database, config: AppConfig): AuthUser {
   const existing = db.prepare(
-    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, created_at
+    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, created_at, last_login_at
      FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).get(config.adminUsername) as UserRow | undefined;
   if (existing) {
@@ -105,6 +120,7 @@ export function initializeAdmin(db: Database.Database, config: AppConfig): AuthU
     can_upload: 1,
     can_edit: 1,
     created_at: now,
+    last_login_at: null,
   });
 }
 
@@ -140,7 +156,7 @@ export async function getSessionUser(
 
   const row = db.prepare(
     `SELECT u.id, u.username, u.role, u.is_enabled,
-            u.can_read, u.can_upload, u.can_edit, u.created_at
+            u.can_read, u.can_upload, u.can_edit, u.created_at, u.last_login_at
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ? AND u.is_enabled = 1`,

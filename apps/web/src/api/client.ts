@@ -1,10 +1,14 @@
 import type {
+  ChangePasswordInput,
+  CreateUserInput,
   FileListParams,
   FileListResponse,
   FileRecord,
+  ResetPasswordInput,
   SessionResponse,
   UploadProgress,
   UserAccessUpdate,
+  UserDetailsResponse,
   UsersResponse,
 } from '../types';
 
@@ -77,9 +81,23 @@ export const api = {
   }),
   logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   listUsers: () => request<UsersResponse>('/api/admin/users'),
+  createUser: (input: CreateUserInput) => request<{ user: UsersResponse['users'][number] }>(
+    '/api/admin/users',
+    { method: 'POST', body: JSON.stringify(input) },
+  ),
+  getUser: (id: string) => request<UserDetailsResponse>(`/api/admin/users/${id}`),
+  deleteUser: (id: string) => request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: 'DELETE' }),
+  resetUserPassword: (id: string, input: ResetPasswordInput) => request<{ ok: boolean }>(
+    `/api/admin/users/${id}/reset-password`,
+    { method: 'POST', body: JSON.stringify(input) },
+  ),
   updateUserAccess: (id: string, update: UserAccessUpdate) => request<{ user: UsersResponse['users'][number] }>(
     `/api/admin/users/${id}`,
     { method: 'PATCH', body: JSON.stringify(update) },
+  ),
+  changeOwnPassword: (input: ChangePasswordInput) => request<{ ok: boolean }>(
+    '/api/auth/password',
+    { method: 'POST', body: JSON.stringify(input) },
   ),
   listFiles: (params: FileListParams) => request<FileListResponse>(`/api/files${queryString(params)}`),
   getFile: (id: string) => request<{ file: FileRecord }>(`/api/files/${id}`),

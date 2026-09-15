@@ -11,8 +11,10 @@ export function App() {
     queryKey: ['session'],
     queryFn: api.session,
     retry: false,
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true,
+    // 仅已登录（存在会话数据）时才保持 15s 心跳轮询；
+    // 未登录时停止轮询，避免登录页每 15 秒反复请求 /api/auth/session
+    refetchInterval: (query) => (query.state.data ? 15_000 : false),
+    refetchOnWindowFocus: (query) => Boolean(query.state.data),
   });
   const logout = useMutation({
     mutationFn: api.logout,

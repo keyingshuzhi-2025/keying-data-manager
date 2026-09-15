@@ -2,6 +2,8 @@ node_modules/
 .npm-cache/
 dist/
 apps/web/dev-dist/
+logs/
+tools/
 data/
 apps/server/data/
 *.log
