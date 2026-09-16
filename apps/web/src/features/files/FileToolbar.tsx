@@ -21,7 +21,7 @@ interface FileToolbarProps {
   view: 'list' | 'grid';
   onViewChange: (value: 'list' | 'grid') => void;
   onCreateFolder: () => void;
-  onUpload: () => void;
+  onFilesSelected: (files: File[]) => void;
   canUpload: boolean;
   disabled?: boolean;
 }
@@ -94,10 +94,25 @@ export function FileToolbar(props: FileToolbarProps) {
           <FolderPlus size={18} />
           <span>新建文件夹</span>
         </button>
-        <button className="button button--primary" type="button" onClick={props.onUpload} disabled={props.disabled}>
+        <label
+          className={`button button--primary upload-picker${props.disabled ? ' is-disabled' : ''}`}
+          aria-disabled={props.disabled}
+        >
           <Upload size={18} />
           <span>上传文件</span>
-        </button>
+          <input
+            type="file"
+            multiple
+            className="sr-only"
+            tabIndex={-1}
+            disabled={props.disabled}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.value = '';
+              if (files.length > 0) props.onFilesSelected(files);
+            }}
+          />
+        </label>
       </div> : null}
     </div>
   );

@@ -2,9 +2,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
-  useRef,
   useState,
-  type ChangeEvent,
   type DragEvent,
 } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -81,7 +79,6 @@ export function FilesPage({
   const canRead = user.permissions.read;
   const canUpload = user.permissions.upload;
   const canEdit = user.permissions.edit;
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [folderId, setFolderId] = useState<string | null>(folderFromLocation);
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search.trim());
@@ -271,9 +268,7 @@ export function FilesPage({
     }
   }, [canUpload, isUploading, online, refresh, showToast, uploadOne]);
 
-  const selectFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(event.target.files ?? []);
-    event.target.value = '';
+  const selectFiles = (selected: File[]) => {
     void beginUploads(selected);
   };
 
@@ -375,11 +370,10 @@ export function FilesPage({
                 view={view}
                 onViewChange={setView}
                 onCreateFolder={() => setDialog({ type: 'create' })}
-                onUpload={() => fileInputRef.current?.click()}
+                onFilesSelected={selectFiles}
                 canUpload={canUpload}
                 disabled={!online || isUploading}
               />
-              {canUpload ? <input ref={fileInputRef} className="sr-only" type="file" multiple onChange={selectFiles} tabIndex={-1} /> : null}
             </>
           ) : null}
 
