@@ -91,6 +91,62 @@ export interface ChangePasswordInput {
   newPassword: string;
 }
 
+export type BatchAction = 'enable' | 'disable' | 'delete';
+
+export interface BatchUsersInput {
+  ids: string[];
+  action: BatchAction;
+}
+
+export interface BatchUsersResult {
+  ok: boolean;
+  affected: number;
+}
+
+export interface RoleChangeInput {
+  role: 'admin' | 'user';
+}
+
+export interface Invite {
+  id: string;
+  code: string;
+  permissions: {
+    read: boolean;
+    upload: boolean;
+    edit: boolean;
+  };
+  isEnabled: boolean;
+  createdAt: string;
+  expiresAt: string | null;
+  usedBy: string | null;
+  usedAt: string | null;
+  used: boolean;
+  expired: boolean;
+}
+
+export interface InviteCreateInput {
+  permissions: AuthUser['permissions'];
+  expiresInHours?: number;
+}
+
+export interface InvitesResponse {
+  invites: Invite[];
+}
+
+export interface ActivityRecord {
+  id: string;
+  userId: string;
+  action: string;
+  targetType: string | null;
+  targetName: string | null;
+  detail: string | null;
+  createdAt: string;
+}
+
+export interface UserActivityResponse {
+  activities: ActivityRecord[];
+}
+
 export interface UploadProgress {
   loaded: number;
   total: number;

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { ArrowRight, FolderLock, LoaderCircle, UserPlus, WifiOff } from 'lucide-react';
+import { ArrowRight, FolderLock, Gift, LoaderCircle, UserPlus, WifiOff } from 'lucide-react';
 import { api } from '../../api/client';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import type { SessionResponse } from '../../types';
@@ -13,15 +13,23 @@ interface LoginPageProps {
 
 type AuthMode = 'login' | 'register';
 
+function inviteCodeFromUrl(): string | null {
+  const value = new URL(window.location.href).searchParams.get('invite');
+  return value && value.length > 0 && value.length <= 128 ? value : null;
+}
+
 export function LoginPage({ onAuthenticated, initialError }: LoginPageProps) {
-  const [mode, setMode] = useState<AuthMode>('login');
+  const inviteCode = inviteCodeFromUrl();
+  const [mode, setMode] = useState<AuthMode>(inviteCode ? 'register' : 'login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const online = useOnlineStatus();
   const authenticate = useMutation({
     mutationFn: ({ action, account, secret }: { action: AuthMode; account: string; secret: string }) => (
-      action === 'login' ? api.login(account, secret) : api.register(account, secret)
+      action === 'login'
+        ? api.login(account, secret)
+        : api.register(account, secret, inviteCode ?? undefined)
     ),
     onSuccess: onAuthenticated,
   });
@@ -89,6 +97,11 @@ export function LoginPage({ onAuthenticated, initialError }: LoginPageProps) {
           {!online ? (
             <div className="notice notice--warning"><WifiOff size={18} />当前处于离线状态，恢复网络后再继续。</div>
           ) : null}
+          {inviteCode ? (
+            <div className="notice notice--invite"><Gift size={18} />
+              <span><strong>正在通过邀请链接注册</strong>注册成功后，将自动获得邀请中预设的文件权限，无需等待管理员授权。</span>
+            </div>
+          ) : null}
           {authenticate.isError || initialError ? (
             <div className="notice notice--error" role="alert">
               {authenticate.isError ? errorMessage(authenticate.error) : initialError}
@@ -144,7 +157,9 @@ export function LoginPage({ onAuthenticated, initialError }: LoginPageProps) {
             {!authenticate.isPending ? (mode === 'login' ? <ArrowRight size={18} /> : <UserPlus size={18} />) : null}
           </button>
           <p className="login-form__footnote">
-            {mode === 'register' ? '新账号默认无文件权限，请联系管理员授权。' : '会话仅保存在此浏览器的安全 Cookie 中。'}
+            {mode === 'register'
+              ? (inviteCode ? '该邀请仅能使用一次；注册后即可按邀请权限访问文件。' : '新账号默认无文件权限，请联系管理员授权。')
+              : '会话仅保存在此浏览器的安全 Cookie 中。'}
           </p>
         </form>
       </section>

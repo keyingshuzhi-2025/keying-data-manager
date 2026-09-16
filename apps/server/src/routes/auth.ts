@@ -19,6 +19,7 @@ import {
 } from '../auth.js';
 import type { AppConfig } from '../config.js';
 import type { HubDatabase } from '../db/database.js';
+import { recordActivity } from '../activity-log.js';
 import { badRequest, conflict, forbidden, unauthorized } from '../errors.js';
 
 const usernameSchema = z.string()
@@ -35,6 +36,7 @@ const loginSchema = z.object({
 const registerSchema = z.object({
   username: usernameSchema,
   password: z.string().min(8, '密码至少 8 个字符').max(1024),
+  inviteCode: z.string().trim().min(1).max(128).optional(),
 });
 
 const userSchema = z.object({
@@ -98,23 +100,62 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
     const input = parseOrThrow(registerSchema, request.body, '注册参数无效');
     if (findLoginUser(context, input.username)) throw conflict('该用户名已被使用');
 
+    // 校验邀请码（可选）：未停用、未使用、未过期
+    let invite: { id: string; can_read: number; can_upload: number; can_edit: number } | undefined;
+    if (input.inviteCode) {
+      const row = context.db.sqlite.prepare(
+        `SELECT id, can_read, can_upload, can_edit, is_enabled, used_by, expires_at
+         FROM invites WHERE code = ? LIMIT 1`,
+      ).get(input.inviteCode) as {
+        id: string;
+        can_read: number;
+        can_upload: number;
+        can_edit: number;
+        is_enabled: number;
+        used_by: string | null;
+        expires_at: string | null;
+      } | undefined;
+      if (!row || !row.is_enabled || row.used_by) throw badRequest('邀请码无效或已被使用');
+      if (row.expires_at !== null && row.expires_at <= new Date().toISOString()) {
+        throw badRequest('邀请码已过期');
+      }
+      invite = row;
+    }
+
     const user: UserRow = {
       id: randomBytes(16).toString('hex'),
       username: input.username,
       role: 'user',
       is_enabled: 1,
-      can_read: 0,
-      can_upload: 0,
-      can_edit: 0,
+      can_read: invite?.can_read ?? 0,
+      can_upload: invite?.can_upload ?? 0,
+      can_edit: invite?.can_edit ?? 0,
       created_at: new Date().toISOString(),
       last_login_at: null,
     };
     try {
-      context.db.sqlite.prepare(
-        `INSERT INTO users
-          (id, username, password_hash, role, is_enabled, can_read, can_upload, can_edit, created_at)
-         VALUES (?, ?, ?, 'user', 1, 0, 0, 0, ?)`,
-      ).run(user.id, user.username, hashPassword(input.password), user.created_at);
+      const transaction = context.db.sqlite.transaction(() => {
+        context.db.sqlite.prepare(
+          `INSERT INTO users
+            (id, username, password_hash, role, is_enabled, can_read, can_upload, can_edit, created_at)
+           VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
+        ).run(
+          user.id,
+          user.username,
+          hashPassword(input.password),
+          user.is_enabled,
+          user.can_read,
+          user.can_upload,
+          user.can_edit,
+          user.created_at,
+        );
+        if (invite) {
+          context.db.sqlite.prepare(
+            `UPDATE invites SET used_by = ?, used_at = ?, is_enabled = 0 WHERE id = ?`,
+          ).run(user.id, new Date().toISOString(), invite.id);
+        }
+      });
+      transaction();
     } catch (error) {
       if (String((error as { code?: string }).code).startsWith('SQLITE_CONSTRAINT')) {
         throw conflict('该用户名已被使用');
@@ -122,6 +163,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
       throw error;
     }
 
+    recordActivity(context.db.sqlite, { userId: user.id, action: 'register', targetName: user.username });
     return reply.code(201).send(startSession(context, reply, user));
   });
 
@@ -136,11 +178,19 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
 
     const session = startSession(context, reply, user);
     recordLastLogin(context.db.sqlite, user.id);
+    recordActivity(context.db.sqlite, { userId: user.id, action: 'login', targetName: user.username });
     return session;
   });
 
   app.post('/api/auth/logout', async (request, reply) => {
-    deleteSession(context.db.sqlite, request.cookies?.lfh_session);
+    const token = request.cookies?.lfh_session;
+    if (token) {
+      const row = context.db.sqlite.prepare(
+        'SELECT user_id FROM sessions WHERE token_hash = ? LIMIT 1',
+      ).get(hashSessionToken(token)) as { user_id: string } | undefined;
+      if (row) recordActivity(context.db.sqlite, { userId: row.user_id, action: 'logout' });
+    }
+    deleteSession(context.db.sqlite, token);
     clearSessionCookie(reply, context.config);
     return { ok: true };
   });
@@ -164,6 +214,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
     context.db.sqlite.prepare(
       `DELETE FROM sessions WHERE user_id = ? AND token_hash != ?`,
     ).run(current.id, hashSessionToken(request.cookies?.lfh_session ?? ''));
+    recordActivity(context.db.sqlite, { userId: current.id, action: 'change_password' });
     return reply.send({ ok: true });
   });
 

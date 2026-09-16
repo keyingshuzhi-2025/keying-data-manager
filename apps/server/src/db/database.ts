@@ -15,7 +15,7 @@ export class HubDatabase {
     this.sqlite.pragma('busy_timeout = 5000');
     this.sqlite.exec(schema);
     this.migrateUsers();
-    this.sqlite.pragma('user_version = 3');
+    this.sqlite.pragma('user_version = 4');
   }
 
   private migrateUsers(): void {

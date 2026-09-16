@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import { recordActivity, type ActivityInput } from '../activity-log.js';
 import type { AppConfig } from '../config.js';
 import type { HubDatabase } from '../db/database.js';
 import { badRequest, notFound, unsupportedMediaType } from '../errors.js';
@@ -10,7 +11,7 @@ import {
   normalizeMimeType,
 } from '../file-service.js';
 import type { LocalObjectStorage } from '../storage.js';
-import { requirePermission } from '../auth.js';
+import { requirePermission, type AuthenticatedRequest } from '../auth.js';
 import type { FileRecord, ListFilesQuery } from '../types.js';
 
 const idSchema = z.string().uuid();
@@ -57,6 +58,17 @@ function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string):
   const result = schema.safeParse(value);
   if (!result.success) throw badRequest(message, result.error.flatten());
   return result.data;
+}
+
+/** 记录当前认证用户的一次文件操作；未登录或失败时静默跳过 */
+function logFileActivity(
+  request: FastifyRequest,
+  db: HubDatabase,
+  input: Omit<ActivityInput, 'userId'>,
+): void {
+  const userId = (request as AuthenticatedRequest).user?.id;
+  if (!userId) return;
+  recordActivity(db.sqlite, { ...input, userId });
 }
 
 function fileIdFromParams(request: FastifyRequest): string {
@@ -130,7 +142,13 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
 
   app.post('/api/files', { preHandler: requireUpload }, async (request) => {
     const input = parseOrThrow(createFolderSchema, request.body, '创建目录参数无效');
-    return { file: context.files.createFolder(input.parentId ?? null, input.name) };
+    const file = context.files.createFolder(input.parentId ?? null, input.name);
+    logFileActivity(request, context.db, {
+      action: 'create_folder',
+      targetType: 'folder',
+      targetName: file.name,
+    });
+    return { file };
   });
 
   app.get('/api/files/:id', { preHandler: requireRead }, async (request) => {
@@ -143,24 +161,50 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
 
   app.patch('/api/files/:id', { preHandler: requireEdit }, async (request) => {
     const input = parseOrThrow(updateFileSchema, request.body, '更新参数无效');
-    return { file: context.files.update(fileIdFromParams(request), {
+    const id = fileIdFromParams(request);
+    const file = context.files.update(id, {
       name: input.name === undefined ? undefined : normalizeFileName(input.name),
       parentId: input.parentId === undefined ? undefined : (input.parentId ?? null),
-    }) };
+    });
+    logFileActivity(request, context.db, {
+      action: 'rename',
+      targetType: file.kind === 'folder' ? 'folder' : 'file',
+      targetName: file.name,
+    });
+    return { file };
   });
 
   app.post('/api/files/:id/move', { preHandler: requireEdit }, async (request) => {
     const input = parseOrThrow(moveFileSchema, request.body, '移动参数无效');
-    return { file: context.files.move(fileIdFromParams(request), input.parentId ?? null) };
+    const file = context.files.move(fileIdFromParams(request), input.parentId ?? null);
+    logFileActivity(request, context.db, {
+      action: 'move',
+      targetType: file.kind === 'folder' ? 'folder' : 'file',
+      targetName: file.name,
+    });
+    return { file };
   });
 
   app.post('/api/files/:id/copy', { preHandler: requireEdit }, async (request) => {
     const input = parseOrThrow(copyFileSchema, request.body, '复制参数无效');
-    return { file: context.files.copy(fileIdFromParams(request), input.parentId ?? null, input.name) };
+    const file = context.files.copy(fileIdFromParams(request), input.parentId ?? null, input.name);
+    logFileActivity(request, context.db, {
+      action: 'copy',
+      targetType: file.kind === 'folder' ? 'folder' : 'file',
+      targetName: file.name,
+    });
+    return { file };
   });
 
   app.delete('/api/files/:id', { preHandler: requireEdit }, async (request) => {
-    await context.files.delete(fileIdFromParams(request));
+    const id = fileIdFromParams(request);
+    const file = context.files.get(id);
+    await context.files.delete(id);
+    logFileActivity(request, context.db, {
+      action: 'delete',
+      targetType: file.kind === 'folder' ? 'folder' : 'file',
+      targetName: file.name,
+    });
     return { ok: true };
   });
 
@@ -205,6 +249,11 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
         sizeBytes: stored.sizeBytes,
         sha256: stored.sha256,
       });
+      logFileActivity(request, context.db, {
+        action: 'upload',
+        targetType: 'file',
+        targetName: record.name,
+      });
       return reply.code(201).send({ file: record });
     } catch (error) {
       if (stored) await context.storage.remove(stored.objectId).catch(() => undefined);
@@ -220,6 +269,11 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
   app.get('/api/files/:id/download', { preHandler: requireRead }, async (request, reply) => {
     const file = context.files.get(fileIdFromParams(request));
     if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
+    logFileActivity(request, context.db, {
+      action: 'download',
+      targetType: 'file',
+      targetName: file.name,
+    });
     return sendFile(file, request, reply, true, context.storage);
   });
 

@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Eye,
+  Gift,
   KeyRound,
   LoaderCircle,
   RefreshCw,
@@ -14,8 +15,16 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { Modal } from '../../components/Modal';
-import type { AuthUser, CreateUserInput, UserDetailsResponse } from '../../types';
+import { ACTIVITY_LABELS } from '../../utils/activityLabels';
+import type {
+  ActivityRecord,
+  AuthUser,
+  BatchAction,
+  CreateUserInput,
+  UserDetailsResponse,
+} from '../../types';
 import { errorMessage, formatBytes, formatDate } from '../../utils/format';
+import { InvitesPanel } from './InvitesPanel';
 
 interface UserManagementDialogProps {
   currentUser: AuthUser;
@@ -25,6 +34,8 @@ interface UserManagementDialogProps {
 interface UserPermissionRowProps {
   user: AuthUser;
   currentUser: AuthUser;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
   saving: boolean;
   onSave: (id: string, update: { isEnabled: boolean; permissions: AuthUser['permissions'] }) => void;
   onReset: (user: AuthUser) => void;
@@ -45,6 +56,8 @@ const permissionLabels: Array<{
 const UserPermissionRow = memo(function UserPermissionRow({
   user,
   currentUser,
+  selected,
+  onToggleSelect,
   saving,
   onSave,
   onReset,
@@ -63,10 +76,21 @@ const UserPermissionRow = memo(function UserPermissionRow({
   const isSelf = user.id === currentUser.id;
   const dirty = isEnabled !== user.isEnabled
     || permissionLabels.some(({ key }) => permissions[key] !== user.permissions[key]);
+  const selectable = !isAdmin && !isSelf;
 
   return (
     <article className={`user-access-row ${!isEnabled ? 'is-disabled' : ''}`}>
       <header className="user-access-row__identity">
+        {selectable ? (
+          <label className="user-select-check" title={selected ? '取消选择' : '选择此用户'}>
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect(user.id)}
+              aria-label={`选择 ${user.username}`}
+            />
+          </label>
+        ) : null}
         <div className="user-avatar">
           {isAdmin ? <ShieldCheck size={20} /> : <UserRound size={20} />}
         </div>
@@ -121,7 +145,7 @@ const UserPermissionRow = memo(function UserPermissionRow({
             type="button"
             onClick={() => onViewDetails(user)}
             disabled={saving}
-            title="查看用户详情与统计"
+            title="查看用户详情、统计与操作记录"
             aria-label="查看详情"
           >
             <Eye size={17} />
@@ -138,7 +162,7 @@ const UserPermissionRow = memo(function UserPermissionRow({
               <KeyRound size={17} />
             </button>
           ) : null}
-          {!isAdmin && !isSelf ? (
+          {selectable ? (
             <button
               className="icon-button icon-button--danger"
               type="button"
@@ -188,15 +212,12 @@ function CreateUserDialog({ onClose, onCreated }: {
 
   const create = useMutation({
     mutationFn: (input: CreateUserInput) => api.createUser(input),
-    onSuccess: ({ user }) => {
-      onCreated(user);
-    },
+    onSuccess: ({ user }) => onCreated(user),
   });
 
   const valid = username.trim().length >= 3
     && /^[A-Za-z0-9._-]+$/.test(username)
     && password.length >= 8;
-  const passwordsStrong = password.length >= 8;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -236,7 +257,6 @@ function CreateUserDialog({ onClose, onCreated }: {
             minLength={8}
             required
           />
-          {password && !passwordsStrong ? <small className="field-error">至少 8 个字符</small> : null}
         </label>
         <label className="account-toggle">
           <input
@@ -329,27 +349,22 @@ function ResetPasswordDialog({ user, onClose, onDone }: {
   );
 }
 
-// ----- 删除确认对话框 -----
-function DeleteUserDialog({ user, onClose, onDone }: {
-  user: AuthUser;
+// ----- 删除确认对话框（单个或批量） -----
+function DeleteConfirmDialog({ title, description, pending, onClose, onConfirm }: {
+  title: string;
+  description: string;
+  pending: boolean;
   onClose: () => void;
-  onDone: () => void;
+  onConfirm: () => void;
 }) {
-  const remove = useMutation({
-    mutationFn: () => api.deleteUser(user.id),
-    onSuccess: () => onDone(),
-  });
   return (
-    <Modal title="删除用户" description={`确认要永久删除用户 “${user.username}” 吗？该账号的所有会话将立即失效，此操作不可撤销。`} onClose={onClose} size="small">
+    <Modal title={title} description={description} onClose={onClose} size="small">
       <div className="user-create-form">
-        {remove.isError ? (
-          <div className="notice notice--error" role="alert">{errorMessage(remove.error)}</div>
-        ) : null}
         <div className="user-create-form__footer">
           <button className="button button--secondary" type="button" onClick={onClose}>取消</button>
-          <button className="button button--danger" type="button" onClick={() => remove.mutate()} disabled={remove.isPending}>
-            {remove.isPending ? <LoaderCircle className="spin" size={17} /> : null}
-            {remove.isPending ? '删除中…' : '确认删除'}
+          <button className="button button--danger" type="button" onClick={onConfirm} disabled={pending}>
+            {pending ? <LoaderCircle className="spin" size={17} /> : null}
+            {pending ? '删除中…' : '确认删除'}
           </button>
         </div>
       </div>
@@ -357,20 +372,64 @@ function DeleteUserDialog({ user, onClose, onDone }: {
   );
 }
 
-// ----- 用户详情对话框 -----
-function UserDetailsDialog({ userId, username, onClose }: {
-  userId: string;
-  username: string;
+// ----- 角色变更确认 -----
+function RoleConfirmDialog({ user, targetRole, pending, onClose, onConfirm }: {
+  user: AuthUser;
+  targetRole: 'admin' | 'user';
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const promote = targetRole === 'admin';
+  return (
+    <Modal
+      title={promote ? '提升为管理员' : '降级为普通用户'}
+      description={promote
+        ? `确认将 “${user.username}” 提升为管理员？管理员拥有全部文件权限，并可管理所有用户与邀请。`
+        : `确认将 “${user.username}” 降级为普通用户？其文件权限将按其当前设置生效。`}
+      onClose={onClose}
+      size="small"
+    >
+      <div className="user-create-form">
+        <div className="user-create-form__footer">
+          <button className="button button--secondary" type="button" onClick={onClose}>取消</button>
+          <button className="button button--primary" type="button" onClick={onConfirm} disabled={pending}>
+            {pending ? <LoaderCircle className="spin" size={17} /> : null}
+            {pending ? '处理中…' : (promote ? '确认提升' : '确认降级')}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ----- 用户详情对话框（统计 + 角色 + 活动日志） -----
+function UserDetailsDialog({ user, currentUser, onClose }: {
+  user: AuthUser;
+  currentUser: AuthUser;
   onClose: () => void;
 }) {
   const details = useQuery({
-    queryKey: ['admin-user-details', userId],
-    queryFn: () => api.getUser(userId),
-    enabled: Boolean(userId),
+    queryKey: ['admin-user-details', user.id],
+    queryFn: () => api.getUser(user.id),
   });
+  const activity = useQuery({
+    queryKey: ['admin-user-activity', user.id],
+    queryFn: () => api.getUserActivity(user.id),
+  });
+  const changeRole = useMutation({
+    mutationFn: (role: 'admin' | 'user') => api.changeUserRole(user.id, { role }),
+    onSuccess: () => onClose(),
+  });
+  const [roleConfirm, setRoleConfirm] = useState<'admin' | 'user' | null>(null);
+
   const d = details.data as UserDetailsResponse | undefined;
+  const roleTarget: 'admin' | 'user' | null = user.id !== currentUser.id
+    ? (user.role === 'admin' ? 'user' : 'admin')
+    : null;
+
   return (
-    <Modal title="用户详情" description={`账号 “${username}” 的使用统计`} onClose={onClose} size="medium">
+    <Modal title="用户详情" description={`账号 “${user.username}” 的使用统计与操作记录`} onClose={onClose} size="large">
       <div className="user-details">
         {details.isPending ? (
           <div className="surface-state"><LoaderCircle className="spin" size={24} /><span>正在读取…</span></div>
@@ -394,16 +453,68 @@ function UserDetailsDialog({ userId, username, onClose }: {
               <div><dt>项目总数</dt><dd>{d.stats.globalFileCount} 个</dd></div>
               <div><dt>占用空间</dt><dd>{formatBytes(d.stats.globalTotalBytes)}</dd></div>
             </dl>
-            <p className="user-details__note">本站所有文件对登录用户可见，因此文件与占用统计为全站数据。</p>
+
+            {roleTarget ? (
+              <div className="user-details__role">
+                <span>{user.role === 'admin' ? '该账号当前为管理员。' : '该账号当前为普通用户。'}</span>
+                <button
+                  className="button button--secondary"
+                  type="button"
+                  onClick={() => setRoleConfirm(roleTarget)}
+                  disabled={changeRole.isPending}
+                >
+                  <ShieldCheck size={16} />
+                  {roleTarget === 'admin' ? '提升为管理员' : '降级为普通用户'}
+                </button>
+              </div>
+            ) : null}
+
+            <h3 className="user-details__heading">操作记录（最近 50 条）</h3>
+            {activity.isPending ? (
+              <div className="surface-state"><LoaderCircle className="spin" size={20} /><span>正在读取…</span></div>
+            ) : activity.isError ? (
+              <div className="notice notice--error" role="alert">{errorMessage(activity.error)}</div>
+            ) : activity.data && activity.data.activities.length === 0 ? (
+              <div className="surface-state surface-state--empty"><span>该用户还没有操作记录。</span></div>
+            ) : (
+              <ul className="activity-timeline">
+                {activity.data?.activities.map((item: ActivityRecord) => (
+                  <li key={item.id} className="activity-item">
+                    <span className="activity-item__dot" />
+                    <div>
+                      <strong>{ACTIVITY_LABELS[item.action] ?? item.action}</strong>
+                      {item.targetName ? <span> · {item.targetName}</span> : null}
+                      {item.detail ? <small>{item.detail}</small> : null}
+                    </div>
+                    <time>{formatDate(item.createdAt)}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         ) : null}
         <div className="user-create-form__footer">
-          <button className="button button--secondary" type="button" onClick={() => details.refetch()} disabled={details.isFetching}>
+          <button
+            className="button button--secondary"
+            type="button"
+            onClick={() => { details.refetch(); activity.refetch(); }}
+            disabled={details.isFetching}
+          >
             <RefreshCw size={15} /> 刷新
           </button>
           <button className="button button--primary" type="button" onClick={onClose}>关闭</button>
         </div>
       </div>
+
+      {roleConfirm ? (
+        <RoleConfirmDialog
+          user={user}
+          targetRole={roleConfirm}
+          pending={changeRole.isPending}
+          onClose={() => setRoleConfirm(null)}
+          onConfirm={() => changeRole.mutate(roleConfirm)}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -411,6 +522,7 @@ function UserDetailsDialog({ userId, username, onClose }: {
 // ----- 主对话框 -----
 export function UserManagementDialog({ currentUser, onClose }: UserManagementDialogProps) {
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<'users' | 'invites'>('users');
   const users = useQuery({
     queryKey: ['admin-users'],
     queryFn: api.listUsers,
@@ -424,14 +536,23 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
       }));
     },
   });
+  const batchAction = useMutation({
+    mutationFn: ({ ids, action }: { ids: string[]; action: BatchAction }) => api.batchUsers({ ids, action }),
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+    },
+  });
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
   const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'user'>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<AuthUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AuthUser | null>(null);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [detailsTarget, setDetailsTarget] = useState<AuthUser | null>(null);
 
   const filteredUsers = useMemo(() => {
@@ -446,6 +567,40 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
     });
   }, [users.data, search, statusFilter, roleFilter]);
 
+  const selectableUsers = useMemo(() => filteredUsers.filter(
+    (u) => u.role !== 'admin' && u.id !== currentUser.id,
+  ), [filteredUsers, currentUser.id]);
+  const allSelected = selectableUsers.length > 0
+    && selectableUsers.every((u) => selectedIds.has(u.id));
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allSelected) {
+        selectableUsers.forEach((u) => next.delete(u.id));
+        return next;
+      }
+      selectableUsers.forEach((u) => next.add(u.id));
+      return next;
+    });
+  };
+  const runBatch = (action: BatchAction) => {
+    if (selectedIds.size === 0) return;
+    if (action === 'delete') {
+      setBatchDeleteOpen(true);
+      return;
+    }
+    batchAction.mutate({ ids: [...selectedIds], action });
+  };
+
   const counters = useMemo(() => {
     const list = users.data?.users ?? [];
     return {
@@ -459,86 +614,170 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
     <>
       <Modal
         title="用户与权限"
-        description="普通用户注册后默认无文件权限，由管理员在此授权。可新建用户、重置密码或删除账号。"
+        description="管理账号、权限、角色与邀请链接。"
         onClose={onClose}
         size="large"
       >
         <div className="user-management">
-          <div className="permission-note">
-            <UsersRound size={20} />
-            <div><strong>读取权限包含下载</strong><span>获得读取权限的用户可将文件下载到自己的设备；上传和编辑会自动开启读取权限。</span></div>
-          </div>
-
-          <div className="user-management__toolbar">
-            <label className="search-field">
-              <Search size={16} />
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="按账号搜索"
-                aria-label="按账号搜索"
-              />
-            </label>
-            <select
-              className="select-field"
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-              aria-label="按状态筛选"
+          <div className="user-management__tabs" role="tablist" aria-label="管理视图">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'users'}
+              className={tab === 'users' ? 'is-active' : ''}
+              onClick={() => setTab('users')}
             >
-              <option value="all">全部状态（{counters.total}）</option>
-              <option value="enabled">已启用（{counters.enabled}）</option>
-              <option value="disabled">已停用（{counters.disabled}）</option>
-            </select>
-            <select
-              className="select-field"
-              value={roleFilter}
-              onChange={(event) => setRoleFilter(event.target.value as typeof roleFilter)}
-              aria-label="按角色筛选"
+              <UsersRound size={16} /> 用户列表
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'invites'}
+              className={tab === 'invites' ? 'is-active' : ''}
+              onClick={() => setTab('invites')}
             >
-              <option value="all">全部角色</option>
-              <option value="admin">仅管理员</option>
-              <option value="user">仅普通用户</option>
-            </select>
-            <button className="button button--primary" type="button" onClick={() => setCreateOpen(true)}>
-              <UserPlus size={17} /> 新建用户
+              <Gift size={16} /> 邀请链接
             </button>
           </div>
 
-          {users.isPending ? (
-            <div className="surface-state user-management__state"><LoaderCircle className="spin" size={25} /><span>正在读取用户…</span></div>
-          ) : null}
-          {users.isError ? (
-            <div className="notice notice--error" role="alert">
-              <span>{errorMessage(users.error)}</span>
-              <button className="button button--secondary" type="button" onClick={() => users.refetch()}>重试</button>
-            </div>
-          ) : null}
-          {updateAccess.isError ? (
-            <div className="notice notice--error" role="alert">{errorMessage(updateAccess.error)}</div>
-          ) : null}
+          {tab === 'invites' ? (
+            <InvitesPanel currentUser={currentUser} />
+          ) : (
+            <>
+              <div className="permission-note">
+                <UsersRound size={20} />
+                <div><strong>读取权限包含下载</strong><span>获得读取权限的用户可将文件下载到自己的设备；上传和编辑会自动开启读取权限。</span></div>
+              </div>
 
-          {users.data && filteredUsers.length === 0 ? (
-            <div className="surface-state surface-state--empty">
-              <strong>{users.data.users.length === 0 ? '当前还没有任何账号' : '没有匹配的用户'}</strong>
-              <span>{users.data.users.length === 0 ? '点击“新建用户”添加第一个账号。' : '调整搜索条件或筛选器后再试。'}</span>
-            </div>
-          ) : null}
+              <div className="user-management__toolbar">
+                <label className="search-field">
+                  <Search size={16} />
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="按账号搜索"
+                    aria-label="按账号搜索"
+                  />
+                </label>
+                <select
+                  className="select-field"
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+                  aria-label="按状态筛选"
+                >
+                  <option value="all">全部状态（{counters.total}）</option>
+                  <option value="enabled">已启用（{counters.enabled}）</option>
+                  <option value="disabled">已停用（{counters.disabled}）</option>
+                </select>
+                <select
+                  className="select-field"
+                  value={roleFilter}
+                  onChange={(event) => setRoleFilter(event.target.value as typeof roleFilter)}
+                  aria-label="按角色筛选"
+                >
+                  <option value="all">全部角色</option>
+                  <option value="admin">仅管理员</option>
+                  <option value="user">仅普通用户</option>
+                </select>
+                <button className="button button--primary" type="button" onClick={() => setCreateOpen(true)}>
+                  <UserPlus size={17} /> 新建用户
+                </button>
+              </div>
 
-          <div className="user-access-list">
-            {filteredUsers.map((user) => (
-              <UserPermissionRow
-                key={user.id}
-                user={user}
-                currentUser={currentUser}
-                saving={updateAccess.isPending && updateAccess.variables?.id === user.id}
-                onSave={(id, update) => updateAccess.mutate({ id, update })}
-                onReset={(u) => setResetTarget(u)}
-                onDelete={(u) => setDeleteTarget(u)}
-                onViewDetails={(u) => setDetailsTarget(u)}
-              />
-            ))}
-          </div>
+              {selectedIds.size > 0 ? (
+                <div className="batch-bar" role="region" aria-label="批量操作">
+                  <label className="user-select-check">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleSelectAll}
+                      aria-label="全选当前列表"
+                    />
+                  </label>
+                  <span>已选 <strong>{selectedIds.size}</strong> 个账号</span>
+                  <button
+                    className="button button--secondary"
+                    type="button"
+                    onClick={() => runBatch('enable')}
+                    disabled={batchAction.isPending}
+                  >
+                    {batchAction.isPending ? <LoaderCircle className="spin" size={15} /> : null}
+                    批量启用
+                  </button>
+                  <button
+                    className="button button--secondary"
+                    type="button"
+                    onClick={() => runBatch('disable')}
+                    disabled={batchAction.isPending}
+                  >
+                    批量停用
+                  </button>
+                  <button
+                    className="button button--danger"
+                    type="button"
+                    onClick={() => runBatch('delete')}
+                    disabled={batchAction.isPending}
+                  >
+                    <Trash2 size={15} /> 批量删除
+                  </button>
+                </div>
+              ) : (
+                <div className="user-management__select-all">
+                  <label className="user-select-check">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleSelectAll}
+                      disabled={selectableUsers.length === 0}
+                      aria-label="全选当前列表"
+                    />
+                  </label>
+                  <span>选择后可批量启用 / 停用 / 删除（管理员与本人不可选）</span>
+                </div>
+              )}
+
+              {users.isPending ? (
+                <div className="surface-state user-management__state"><LoaderCircle className="spin" size={25} /><span>正在读取用户…</span></div>
+              ) : null}
+              {users.isError ? (
+                <div className="notice notice--error" role="alert">
+                  <span>{errorMessage(users.error)}</span>
+                  <button className="button button--secondary" type="button" onClick={() => users.refetch()}>重试</button>
+                </div>
+              ) : null}
+              {updateAccess.isError ? (
+                <div className="notice notice--error" role="alert">{errorMessage(updateAccess.error)}</div>
+              ) : null}
+              {batchAction.isError ? (
+                <div className="notice notice--error" role="alert">{errorMessage(batchAction.error)}</div>
+              ) : null}
+
+              {users.data && filteredUsers.length === 0 ? (
+                <div className="surface-state surface-state--empty">
+                  <strong>{users.data.users.length === 0 ? '当前还没有任何账号' : '没有匹配的用户'}</strong>
+                  <span>{users.data.users.length === 0 ? '点击“新建用户”添加第一个账号。' : '调整搜索条件或筛选器后再试。'}</span>
+                </div>
+              ) : null}
+
+              <div className="user-access-list">
+                {filteredUsers.map((user) => (
+                  <UserPermissionRow
+                    key={user.id}
+                    user={user}
+                    currentUser={currentUser}
+                    selected={selectedIds.has(user.id)}
+                    onToggleSelect={toggleSelect}
+                    saving={updateAccess.isPending && updateAccess.variables?.id === user.id}
+                    onSave={(id, update) => updateAccess.mutate({ id, update })}
+                    onReset={(u) => setResetTarget(u)}
+                    onDelete={(u) => setDeleteTarget(u)}
+                    onViewDetails={(u) => setDetailsTarget(u)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 
@@ -561,23 +800,44 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
         />
       ) : null}
       {deleteTarget ? (
-        <DeleteUserDialog
-          user={deleteTarget}
+        <DeleteConfirmDialog
+          title="删除用户"
+          description={`确认要永久删除用户 “${deleteTarget.username}” 吗？该账号的所有会话将立即失效，此操作不可撤销。`}
+          pending={false}
           onClose={() => setDeleteTarget(null)}
-          onDone={() => {
+          onConfirm={() => {
             const targetId = deleteTarget.id;
-            queryClient.setQueryData<{ users: AuthUser[] }>(['admin-users'], (current) => ({
-              users: current?.users.filter((u) => u.id !== targetId) ?? [],
-            }));
+            api.deleteUser(targetId)
+              .then(() => {
+                queryClient.setQueryData<{ users: AuthUser[] }>(['admin-users'], (current) => ({
+                  users: current?.users.filter((u) => u.id !== targetId) ?? [],
+                }));
+              })
+              .catch(() => undefined);
             setDeleteTarget(null);
+          }}
+        />
+      ) : null}
+      {batchDeleteOpen ? (
+        <DeleteConfirmDialog
+          title="批量删除用户"
+          description={`确认永久删除选中的 ${selectedIds.size} 个账号？其所有会话将立即失效，此操作不可撤销。`}
+          pending={batchAction.isPending}
+          onClose={() => setBatchDeleteOpen(false)}
+          onConfirm={() => {
+            batchAction.mutate({ ids: [...selectedIds], action: 'delete' });
+            setBatchDeleteOpen(false);
           }}
         />
       ) : null}
       {detailsTarget ? (
         <UserDetailsDialog
-          userId={detailsTarget.id}
-          username={detailsTarget.username}
-          onClose={() => setDetailsTarget(null)}
+          user={detailsTarget}
+          currentUser={currentUser}
+          onClose={() => {
+            setDetailsTarget(null);
+            void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+          }}
         />
       ) : null}
     </>

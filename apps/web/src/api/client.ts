@@ -1,13 +1,20 @@
 import type {
+  BatchUsersInput,
+  BatchUsersResult,
   ChangePasswordInput,
   CreateUserInput,
   FileListParams,
   FileListResponse,
   FileRecord,
+  Invite,
+  InviteCreateInput,
+  InvitesResponse,
   ResetPasswordInput,
+  RoleChangeInput,
   SessionResponse,
   UploadProgress,
   UserAccessUpdate,
+  UserActivityResponse,
   UserDetailsResponse,
   UsersResponse,
 } from '../types';
@@ -75,9 +82,9 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   }),
-  register: (username: string, password: string) => request<SessionResponse>('/api/auth/register', {
+  register: (username: string, password: string, inviteCode?: string) => request<SessionResponse>('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify(inviteCode ? { username, password, inviteCode } : { username, password }),
   }),
   logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   listUsers: () => request<UsersResponse>('/api/admin/users'),
@@ -86,6 +93,7 @@ export const api = {
     { method: 'POST', body: JSON.stringify(input) },
   ),
   getUser: (id: string) => request<UserDetailsResponse>(`/api/admin/users/${id}`),
+  getUserActivity: (id: string) => request<UserActivityResponse>(`/api/admin/users/${id}/activity`),
   deleteUser: (id: string) => request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: 'DELETE' }),
   resetUserPassword: (id: string, input: ResetPasswordInput) => request<{ ok: boolean }>(
     `/api/admin/users/${id}/reset-password`,
@@ -94,6 +102,23 @@ export const api = {
   updateUserAccess: (id: string, update: UserAccessUpdate) => request<{ user: UsersResponse['users'][number] }>(
     `/api/admin/users/${id}`,
     { method: 'PATCH', body: JSON.stringify(update) },
+  ),
+  batchUsers: (input: BatchUsersInput) => request<BatchUsersResult>(
+    '/api/admin/users/batch',
+    { method: 'POST', body: JSON.stringify(input) },
+  ),
+  changeUserRole: (id: string, input: RoleChangeInput) => request<{ user: UsersResponse['users'][number] }>(
+    `/api/admin/users/${id}/role`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  ),
+  createInvite: (input: InviteCreateInput) => request<{ invite: Invite }>(
+    '/api/admin/invites',
+    { method: 'POST', body: JSON.stringify(input) },
+  ),
+  listInvites: () => request<InvitesResponse>('/api/admin/invites'),
+  revokeInvite: (id: string) => request<{ ok: boolean }>(
+    `/api/admin/invites/${id}`,
+    { method: 'DELETE' },
   ),
   changeOwnPassword: (input: ChangePasswordInput) => request<{ ok: boolean }>(
     '/api/auth/password',
