@@ -25,6 +25,7 @@ import { UserManagementDialog } from '../admin/UserManagementDialog';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import type { AuthUser, FileRecord, FileType, SortField, SortOrder } from '../../types';
 import { errorMessage, formatBytes } from '../../utils/format';
+import { generateId } from '../../utils/generateId';
 import { Breadcrumbs } from './Breadcrumbs';
 import {
   CreateFolderDialog,
@@ -237,7 +238,7 @@ export function FilesPage({
   const beginUploads = useCallback(async (selected: File[]) => {
     if (selected.length === 0 || isUploading || !online || !canUpload) return;
     const tasks: UploadTaskWithDestination[] = selected.map((file) => ({
-      id: crypto.randomUUID(),
+      id: generateId(),
       file,
       parentId: folderId,
       progress: 0,
