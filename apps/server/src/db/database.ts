@@ -15,7 +15,9 @@ export class HubDatabase {
     this.sqlite.pragma('busy_timeout = 5000');
     this.sqlite.exec(schema);
     this.migrateUsers();
-    this.sqlite.pragma('user_version = 4');
+    this.migrateSessions();
+    this.migrateFiles();
+    this.sqlite.pragma('user_version = 5');
   }
 
   private migrateUsers(): void {
@@ -27,6 +29,7 @@ export class HubDatabase {
       ['can_read', 'INTEGER NOT NULL DEFAULT 0'],
       ['can_upload', 'INTEGER NOT NULL DEFAULT 0'],
       ['can_edit', 'INTEGER NOT NULL DEFAULT 0'],
+      ['storage_quota_bytes', 'INTEGER NOT NULL DEFAULT 0'],
       ['last_login_at', 'TEXT'],
     ] as const;
 
@@ -34,6 +37,29 @@ export class HubDatabase {
       if (!existing.has(name)) {
         this.sqlite.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
       }
+    }
+  }
+
+  private migrateSessions(): void {
+    const columns = this.sqlite.pragma('table_info(sessions)') as Array<{ name: string }>;
+    const existing = new Set(columns.map((column) => column.name));
+    const additions = [
+      ['ip', 'TEXT'],
+      ['user_agent', 'TEXT'],
+    ] as const;
+
+    for (const [name, definition] of additions) {
+      if (!existing.has(name)) {
+        this.sqlite.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
+      }
+    }
+  }
+
+  private migrateFiles(): void {
+    const columns = this.sqlite.pragma('table_info(files)') as Array<{ name: string }>;
+    const existing = new Set(columns.map((column) => column.name));
+    if (!existing.has('uploaded_by')) {
+      this.sqlite.exec('ALTER TABLE files ADD COLUMN uploaded_by TEXT');
     }
   }
 

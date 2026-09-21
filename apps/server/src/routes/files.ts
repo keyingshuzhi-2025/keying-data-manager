@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { recordActivity, type ActivityInput } from '../activity-log.js';
 import type { AppConfig } from '../config.js';
 import type { HubDatabase } from '../db/database.js';
-import { badRequest, notFound, unsupportedMediaType } from '../errors.js';
+import { badRequest, conflict, notFound, unsupportedMediaType } from '../errors.js';
 import {
   extensionFromName,
   FileService,
@@ -239,6 +239,22 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
         throw unsupportedMediaType('无法识别文件类型，请提供扩展名');
       }
 
+      // 存储配额校验：管理员不受限；超出配额时拒绝并清理已暂存对象
+      const uploader = (request as AuthenticatedRequest).user;
+      if (uploader && uploader.role !== 'admin') {
+        const quotaRow = context.db.sqlite.prepare(
+          'SELECT storage_quota_bytes FROM users WHERE id = ? LIMIT 1',
+        ).get(uploader.id) as { storage_quota_bytes: number } | undefined;
+        const quota = quotaRow?.storage_quota_bytes ?? 0;
+        if (quota > 0) {
+          const used = context.files.uploadedBytesByUser(uploader.id);
+          if (used + stored.sizeBytes > quota) {
+            await context.storage.remove(stored.objectId).catch(() => undefined);
+            throw conflict('存储配额不足，无法上传该文件');
+          }
+        }
+      }
+
       const record = context.files.createFile({
         id: stored.objectId,
         parentId: parentId ?? null,
@@ -248,7 +264,7 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
         extension: extensionFromName(safeName),
         sizeBytes: stored.sizeBytes,
         sha256: stored.sha256,
-      });
+      }, (request as AuthenticatedRequest).user?.id);
       logFileActivity(request, context.db, {
         action: 'upload',
         targetType: 'file',

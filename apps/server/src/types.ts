@@ -47,6 +47,7 @@ export interface AuthUser {
     upload: boolean;
     edit: boolean;
   };
+  storageQuotaBytes: number;
   createdAt: string;
   lastLoginAt: string | null;
 }

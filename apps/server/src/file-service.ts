@@ -22,6 +22,7 @@ interface FileRow {
   extension: string | null;
   size_bytes: number | null;
   sha256: string | null;
+  uploaded_by: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -229,7 +230,7 @@ export class FileService {
     return this.get(id);
   }
 
-  createFile(input: CreateFileInput): FileRecord {
+  createFile(input: CreateFileInput, uploadedBy?: string): FileRecord {
     const safeName = normalizeFileName(input.name);
     this.assertParentFolder(input.parentId);
     const timestamp = nowIso();
@@ -237,8 +238,8 @@ export class FileService {
     try {
       this.db.prepare(
         `INSERT INTO files
-         (id, parent_id, name, kind, object_id, mime_type, extension, size_bytes, sha256, created_at, updated_at)
-         VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?)`,
+         (id, parent_id, name, kind, object_id, mime_type, extension, size_bytes, sha256, uploaded_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         input.id,
         input.parentId,
@@ -248,6 +249,7 @@ export class FileService {
         input.extension,
         input.sizeBytes,
         input.sha256,
+        uploadedBy ?? null,
         timestamp,
         timestamp,
       );
@@ -258,6 +260,16 @@ export class FileService {
     }
 
     return this.get(input.id);
+  }
+
+  /** 返回某用户上传的未删除文件总字节数 */
+  uploadedBytesByUser(userId: string): number {
+    const row = this.db.prepare(
+      `SELECT COALESCE(SUM(size_bytes), 0) AS total
+       FROM files
+       WHERE uploaded_by = ? AND kind = 'file' AND deleted_at IS NULL`,
+    ).get(userId) as { total: number };
+    return row.total;
   }
 
   update(id: string, patch: FilePatch): FileRecord {

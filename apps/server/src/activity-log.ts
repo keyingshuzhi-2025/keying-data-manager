@@ -20,13 +20,17 @@ export type ActivityAction =
   | 'delete_user'
   | 'role_change'
   | 'invite_create'
-  | 'invite_revoke';
+  | 'invite_revoke'
+  | 'session_revoke'
+  | 'sessions_revoke'
+  | 'quota_change';
 
 export type ActivityTargetType = 'file' | 'folder' | 'user' | 'invite';
 
 export interface ActivityRecord {
   id: string;
   userId: string;
+  username?: string;
   action: ActivityAction;
   targetType: ActivityTargetType | null;
   targetName: string | null;
@@ -40,6 +44,46 @@ export interface ActivityInput {
   targetType?: ActivityTargetType;
   targetName?: string;
   detail?: string;
+}
+
+export interface ActivityListParams {
+  userId?: string;
+  action?: string;
+  q?: string;
+  page: number;
+  limit: number;
+}
+
+export interface ActivityListResult {
+  activities: ActivityRecord[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    hasNext: boolean;
+  };
+}
+
+function mapActivityRow(row: {
+  id: string;
+  user_id: string;
+  username?: string;
+  action: ActivityAction;
+  target_type: ActivityTargetType | null;
+  target_name: string | null;
+  detail: string | null;
+  created_at: string;
+}): ActivityRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    username: row.username,
+    action: row.action,
+    targetType: row.target_type,
+    targetName: row.target_name,
+    detail: row.detail,
+    createdAt: row.created_at,
+  };
 }
 
 /** 写入一条活动日志（不主动抛错，失败静默，避免影响主流程） */
@@ -67,30 +111,62 @@ export function listActivityForUser(
   userId: string,
   limit: number,
 ): ActivityRecord[] {
+  return listActivity(db, { userId, page: 1, limit }).activities;
+}
+
+export function listActivity(
+  db: Database.Database,
+  params: ActivityListParams,
+): ActivityListResult {
+  const page = Math.max(1, params.page);
+  const limit = Math.min(200, Math.max(1, params.limit));
+  const clauses: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.userId) {
+    clauses.push('al.user_id = ?');
+    values.push(params.userId);
+  }
+  if (params.action) {
+    clauses.push('al.action = ?');
+    values.push(params.action);
+  }
+  if (params.q?.trim()) {
+    const escaped = params.q.trim().replace(/[\\%_]/g, '\\$&');
+    const like = `%${escaped}%`;
+    clauses.push(`(u.username LIKE ? ESCAPE '\\' OR al.target_name LIKE ? ESCAPE '\\' OR al.detail LIKE ? ESCAPE '\\' OR al.action LIKE ? ESCAPE '\\')`);
+    values.push(like, like, like, like);
+  }
+
+  const from = 'FROM activity_logs al JOIN users u ON u.id = al.user_id';
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const total = (db.prepare(`SELECT COUNT(*) AS total ${from} ${where}`).get(...values) as { total: number }).total;
   const rows = db.prepare(
-    `SELECT id, user_id, action, target_type, target_name, detail, created_at
-     FROM activity_logs
-     WHERE user_id = ?
-     ORDER BY created_at DESC
-     LIMIT ?`,
-  ).all(userId, limit) as Array<{
+    `SELECT al.id, al.user_id, u.username, al.action, al.target_type,
+            al.target_name, al.detail, al.created_at
+     ${from} ${where}
+     ORDER BY al.created_at DESC
+     LIMIT ? OFFSET ?`,
+  ).all(...values, limit, (page - 1) * limit) as Array<{
     id: string;
     user_id: string;
+    username?: string;
     action: ActivityAction;
     target_type: ActivityTargetType | null;
     target_name: string | null;
     detail: string | null;
     created_at: string;
   }>;
-  return rows.map((row) => ({
-    id: row.id,
-    userId: row.user_id,
-    action: row.action,
-    targetType: row.target_type,
-    targetName: row.target_name,
-    detail: row.detail,
-    createdAt: row.created_at,
-  }));
+
+  return {
+    activities: rows.map(mapActivityRow),
+    pagination: {
+      page,
+      limit,
+      total,
+      hasNext: page * limit < total,
+    },
+  };
 }
 
 /** 活动动作的中文描述（供前端与详情展示使用） */
@@ -114,4 +190,7 @@ export const ACTIVITY_LABELS: Record<ActivityAction, string> = {
   role_change: '变更角色',
   invite_create: '生成邀请',
   invite_revoke: '撤销邀请',
+  session_revoke: '强制下线会话',
+  sessions_revoke: '强制下线全部会话',
+  quota_change: '调整存储配额',
 };

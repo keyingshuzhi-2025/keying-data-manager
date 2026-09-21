@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   clearSessionCookie,
@@ -49,6 +49,7 @@ const userSchema = z.object({
     upload: z.boolean(),
     edit: z.boolean(),
   }),
+  storageQuotaBytes: z.number().int().min(0),
   createdAt: z.string(),
   lastLoginAt: z.string().nullable(),
 });
@@ -77,16 +78,25 @@ function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string):
 function findLoginUser(context: RouteContext, username: string): (UserRow & { password_hash: string }) | undefined {
   return context.db.sqlite.prepare(
     `SELECT id, username, password_hash, role, is_enabled,
-            can_read, can_upload, can_edit, created_at, last_login_at
+            can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
      FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).get(username) as (UserRow & { password_hash: string }) | undefined;
 }
 
-function startSession(context: RouteContext, reply: FastifyReply, user: UserRow) {
+function getClientIp(request: FastifyRequest): string | undefined {
+  const forwarded = request.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim().slice(0, 100) || undefined;
+  }
+  return typeof request.ip === 'string' ? request.ip.slice(0, 100) : undefined;
+}
+
+function startSession(context: RouteContext, reply: FastifyReply, user: UserRow, request: FastifyRequest) {
   const session = createSession(
     context.db.sqlite,
     user.id,
     context.config.sessionTtlMs,
+    { ip: getClientIp(request), userAgent: request.headers['user-agent'] },
   );
   setSessionCookie(reply, session.token, context.config);
   return sessionSchema.parse({ user: mapUser(user), expiresAt: session.expiresAt });
@@ -130,6 +140,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
       can_read: invite?.can_read ?? 0,
       can_upload: invite?.can_upload ?? 0,
       can_edit: invite?.can_edit ?? 0,
+      storage_quota_bytes: 0,
       created_at: new Date().toISOString(),
       last_login_at: null,
     };
@@ -137,8 +148,8 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
       const transaction = context.db.sqlite.transaction(() => {
         context.db.sqlite.prepare(
           `INSERT INTO users
-            (id, username, password_hash, role, is_enabled, can_read, can_upload, can_edit, created_at)
-           VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
+            (id, username, password_hash, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at)
+           VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)`,
         ).run(
           user.id,
           user.username,
@@ -147,6 +158,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
           user.can_read,
           user.can_upload,
           user.can_edit,
+          user.storage_quota_bytes,
           user.created_at,
         );
         if (invite) {
@@ -164,7 +176,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
     }
 
     recordActivity(context.db.sqlite, { userId: user.id, action: 'register', targetName: user.username });
-    return reply.code(201).send(startSession(context, reply, user));
+    return reply.code(201).send(startSession(context, reply, user, request));
   });
 
   app.post('/api/auth/login', async (request, reply) => {
@@ -176,7 +188,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
     }
     if (!user.is_enabled) throw forbidden('账号已被管理员停用');
 
-    const session = startSession(context, reply, user);
+    const session = startSession(context, reply, user, request);
     recordLastLogin(context.db.sqlite, user.id);
     recordActivity(context.db.sqlite, { userId: user.id, action: 'login', targetName: user.username });
     return session;

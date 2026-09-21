@@ -78,7 +78,7 @@ function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string):
 
 function getUser(context: RouteContext, id: string): UserRow {
   const user = context.db.sqlite.prepare(
-    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, created_at, last_login_at
+    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
      FROM users WHERE id = ? LIMIT 1`,
   ).get(id) as UserRow | undefined;
   if (!user) throw notFound('用户');
@@ -144,7 +144,7 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
 
   app.get('/api/admin/users', { preHandler: adminOnly }, async () => {
     const rows = context.db.sqlite.prepare(
-      `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, created_at, last_login_at
+      `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
        FROM users ORDER BY role ASC, created_at ASC`,
     ).all() as UserRow[];
     return { users: rows.map(mapUser) };
@@ -211,8 +211,8 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
     const id = randomBytes(16).toString('hex');
     context.db.sqlite.prepare(
       `INSERT INTO users
-        (id, username, password_hash, role, is_enabled, can_read, can_upload, can_edit, created_at)
-       VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
+        (id, username, password_hash, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at)
+       VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.username,
@@ -221,6 +221,7 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
       Number(permissions.read),
       Number(permissions.upload),
       Number(permissions.edit),
+      0,
       now,
     );
     recordActivity(context.db.sqlite, {

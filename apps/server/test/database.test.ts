@@ -38,7 +38,17 @@ describe('database migrations', () => {
       'can_upload',
       'can_edit',
     ]));
-    expect(migrated.sqlite.pragma('user_version', { simple: true })).toBe(2);
+    expect(migrated.sqlite.pragma('user_version', { simple: true })).toBe(5);
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'storage_quota_bytes',
+    ]));
+    const sessionColumns = migrated.sqlite.pragma('table_info(sessions)') as Array<{ name: string }>;
+    expect(sessionColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
+      'ip',
+      'user_agent',
+    ]));
+    const fileColumns = migrated.sqlite.pragma('table_info(files)') as Array<{ name: string }>;
+    expect(fileColumns.map((column) => column.name)).toContain('uploaded_by');
     expect(migrated.sqlite.prepare(
       'SELECT role, can_read FROM users WHERE id = ?',
     ).get('legacy')).toMatchObject({ role: 'user', can_read: 0 });

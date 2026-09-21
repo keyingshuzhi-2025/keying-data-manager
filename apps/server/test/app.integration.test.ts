@@ -4,10 +4,12 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import type { HubDatabase } from '../src/db/database.js';
 import type { AppConfig } from '../src/config.js';
 
 interface TestContext {
   app: FastifyInstance;
+  db: HubDatabase;
   directory: string;
   config: AppConfig;
 }
@@ -54,14 +56,15 @@ async function makeContext(maxUploadBytes = 1024 * 1024): Promise<TestContext> {
     trustProxy: false,
     logLevel: 'silent',
   };
-  const { app } = await buildApp(config);
-  return { app, directory, config };
+  const hub = await buildApp(config);
+  return { app: hub.app, db: hub.db, directory, config };
 }
 
 async function login(app: FastifyInstance): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/api/auth/login',
+    headers: { 'user-agent': 'local-file-hub-vitest' },
     payload: { username: 'admin', password: 'test-password' },
   });
   expect(response.statusCode).toBe(200);
@@ -98,6 +101,17 @@ describe('Local File Hub API', () => {
     const files = await context.app.inject({ method: 'GET', url: '/api/files' });
     expect(files.statusCode).toBe(401);
     expect(files.json().error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('stores session metadata for login requests', async () => {
+    const cookie = await login(context.app);
+    expect(cookie).toBeTruthy();
+
+    const row = context.db.sqlite.prepare(
+      'SELECT ip, user_agent FROM sessions ORDER BY created_at DESC LIMIT 1',
+    ).get() as { ip: string | null; user_agent: string | null };
+    expect(row.ip).toBe('127.0.0.1');
+    expect(row.user_agent).toBe('local-file-hub-vitest');
   });
 
   it('logs in, manages folders, uploads after-file fields, streams, copies and deletes', async () => {
@@ -368,5 +382,60 @@ describe('Local File Hub API', () => {
       payload: multipart.payload,
     });
     expect(response.statusCode).toBe(413);
+  });
+
+  it('enforces a non-admin user storage quota', async () => {
+    const registration = await context.app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { username: 'quota_user', password: 'quota-password' },
+    });
+    expect(registration.statusCode).toBe(201);
+    const userCookie = sessionCookie(registration);
+
+    const adminCookie = await login(context.app);
+    const users = (await context.app.inject({
+      method: 'GET',
+      url: '/api/admin/users',
+      headers: { cookie: adminCookie },
+    })).json().users as Array<{ id: string; username: string }>;
+    const user = users.find((candidate) => candidate.username === 'quota_user');
+    expect(user).toBeDefined();
+    const grant = await context.app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${user!.id}`,
+      headers: { cookie: adminCookie },
+      payload: { permissions: { read: true, upload: true, edit: false } },
+    });
+    expect(grant.statusCode).toBe(200);
+
+    context.db.sqlite.prepare(
+      'UPDATE users SET storage_quota_bytes = ? WHERE id = ?',
+    ).run(5, user!.id);
+
+    const withinQuota = createMultipart('small.txt', '1234', {});
+    const accepted = await context.app.inject({
+      method: 'POST',
+      url: '/api/uploads',
+      headers: {
+        cookie: userCookie,
+        'content-type': `multipart/form-data; boundary=${withinQuota.boundary}`,
+      },
+      payload: withinQuota.payload,
+    });
+    expect(accepted.statusCode).toBe(201);
+
+    const overQuota = createMultipart('too-large.txt', '123456', {});
+    const rejected = await context.app.inject({
+      method: 'POST',
+      url: '/api/uploads',
+      headers: {
+        cookie: userCookie,
+        'content-type': `multipart/form-data; boundary=${overQuota.boundary}`,
+      },
+      payload: overQuota.payload,
+    });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json().error.code).toBe('CONFLICT');
   });
 });

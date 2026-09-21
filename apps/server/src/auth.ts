@@ -20,6 +20,7 @@ export interface UserRow {
   can_read: number;
   can_upload: number;
   can_edit: number;
+  storage_quota_bytes: number;
   created_at: string;
   last_login_at: string | null;
 }
@@ -49,6 +50,7 @@ export function mapUser(row: UserRow): AuthUser {
       upload: isAdmin || Boolean(row.can_upload),
       edit: isAdmin || Boolean(row.can_edit),
     },
+    storageQuotaBytes: row.storage_quota_bytes,
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,
   };
@@ -84,7 +86,7 @@ export function verifyPassword(password: string, encoded: string): boolean {
 
 export function initializeAdmin(db: Database.Database, config: AppConfig): AuthUser {
   const existing = db.prepare(
-    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, created_at, last_login_at
+    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
      FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).get(config.adminUsername) as UserRow | undefined;
   if (existing) {
@@ -119,6 +121,7 @@ export function initializeAdmin(db: Database.Database, config: AppConfig): AuthU
     can_read: 1,
     can_upload: 1,
     can_edit: 1,
+    storage_quota_bytes: 0,
     created_at: now,
     last_login_at: null,
   });
@@ -128,13 +131,22 @@ export function createSession(
   db: Database.Database,
   userId: string,
   ttlMs: number,
+  meta?: { ip?: string; userAgent?: string },
 ): { token: string; expiresAt: string } {
   const token = randomBytes(32).toString('base64url');
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlMs);
   db.prepare(
-    'INSERT INTO sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)',
-  ).run(hashToken(token), userId, expiresAt.toISOString(), now.toISOString());
+    `INSERT INTO sessions (token_hash, user_id, ip, user_agent, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    hashToken(token),
+    userId,
+    meta?.ip ?? null,
+    meta?.userAgent ? meta.userAgent.slice(0, 300) : null,
+    expiresAt.toISOString(),
+    now.toISOString(),
+  );
   return { token, expiresAt: expiresAt.toISOString() };
 }
 
@@ -156,7 +168,8 @@ export async function getSessionUser(
 
   const row = db.prepare(
     `SELECT u.id, u.username, u.role, u.is_enabled,
-            u.can_read, u.can_upload, u.can_edit, u.created_at, u.last_login_at
+            u.can_read, u.can_upload, u.can_edit, u.storage_quota_bytes,
+            u.created_at, u.last_login_at
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ? AND u.is_enabled = 1`,
