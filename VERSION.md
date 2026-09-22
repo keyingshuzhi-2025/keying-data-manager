@@ -1,53 +1,42 @@
 # 当前版本基线
 
-本文档记录本次文档同步所对应的代码版本。它是文档基线，不创建新的 Git 标签，也不改变业务代码。
+本文档记录 v0.1.1 发布所对应的代码版本，是 v0.1.1 Release 的文档基线。
 
 ## 版本标识
 
 | 项目 | 值 |
 |---|---|
-| 包版本 | `0.1.0`（`package.json` / `package-lock.json`） |
-| 分支 | `dev-0.1.1` |
-| 基线提交 | `d981f0c62d24153d4523a7994d8b593e4f79bcaa` |
-| 基线提交时间 | `2026-09-16T21:45:15+08:00` |
-| 已有标签 | `v0.1.0` |
-| 文档同步时间 | `2026-09-21` |
+| 包版本 | `0.1.1`（`package.json` / `package-lock.json`） |
+| 发布分支 | `master` |
+| 基线提交 | `v0.1.1` 标签指向的提交（本次版本提交） |
+| 已有标签 | `v0.1.0`、`v0.1.1` |
+| 文档同步时间 | `2026-09-22` |
 
-## 同步范围
+## v0.1.1 发布范围
 
-- 文档以当前工作区的实际实现为准。
-- 本次只更新仓库自有文档和配置示例，不修改业务代码。
-- 本次没有创建新的 Git commit 或 Git tag。
-- `node_modules/` 中依赖包的文档不属于本项目的维护范围。
+v0.1.1 在 v0.1.0 的基础上完成以下变更：
 
-## 当前工作区代码状态
+- **新功能**
+  - 一次性邀请链接：权限预设（读取 / 上传 / 编辑）与可选过期时间，注册时自动授予；
+  - 用户批量启用 / 停用 / 删除、角色变更、密码重置；
+  - 用户详情统计（活跃会话数、全局文件统计）与最近活动日志查询；
+  - 修改自己的密码，并使其他设备会话失效；
+  - 非管理员存储配额字段与上传校验（`storage_quota_bytes`，超出返回 409）。
+- **后端与内部改进**
+  - SQLite schema 迁移至 `user_version = 5`；
+  - 文件元数据新增 `uploaded_by`；
+  - 会话记录登录 IP 与 User-Agent；
+  - 活动日志按用户查询接口；
+  - 新增配置、数据库迁移、文件服务与 API 集成测试。
+- **修复**
+  - 上传选择文件后无反应（`crypto.randomUUID` 在局域网非安全上下文不可用）；
+  - 上传按钮在移动端 / 部分浏览器点击无反应（改用 `<label>` 原生关联）；
+  - 文件卡片视图按钮贴边、操作区溢出等布局问题；
+  - 未登录状态下的异常轮询刷新。
 
-基线提交之上已有以下未提交的后端/测试改动；README 已按这些实现同步：
-
-- `apps/server/src/activity-log.ts`
-- `apps/server/src/auth.ts`
-- `apps/server/src/db/database.ts`
-- `apps/server/src/db/schema.ts`
-- `apps/server/src/file-service.ts`
-- `apps/server/src/routes/admin.ts`
-- `apps/server/src/routes/auth.ts`
-- `apps/server/src/routes/files.ts`
-- `apps/server/src/types.ts`
-- `apps/server/test/app.integration.test.ts`
-- `apps/server/test/database.test.ts`
-
-这些改动主要涉及：
-
-- SQLite schema 迁移到 `user_version = 5`；
-- 用户存储配额字段；
-- 文件 `uploaded_by` 元数据；
-- 会话 IP / User-Agent 元数据；
-- 活动日志查询；
-- 非管理员上传配额校验；
-- 相关单元和 API 集成测试。
+详细功能与 API 说明见 [README.md](README.md)。
 
 ## 版本使用方式
 
-- `v0.1.0` 是仓库中已有的发布标签。
-- 当前分支仍处于 `dev-0.1.1` 开发状态；在创建新的发布标签前，应以 `VERSION.md` 和 `README.md` 的“当前状态”章节核对实现范围。
-- 如果后续提交代码或创建新标签，应同步更新本文档的基线提交、分支和工作区状态。
+- `v0.1.0`、`v0.1.1` 为仓库已有发布标签。
+- 后续提交代码或创建新标签时，应同步更新本文档的基线提交、分支和工作区状态。
