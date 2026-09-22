@@ -45,10 +45,22 @@ export function mapUser(row: UserRow): AuthUser {
     username: row.username,
     role: row.role,
     isEnabled: Boolean(row.is_enabled),
-    permissions: {
-      read: isAdmin || Boolean(row.can_read),
-      upload: isAdmin || Boolean(row.can_upload),
-      edit: isAdmin || Boolean(row.can_edit),
+    // v0.1.2：六维权限。遗留 users.can_* 保留在库中，作为未命中文件夹 ACL 时的基线；
+    // download 与历史行为一致（可读即可下载）；editMd/share 为新增维度，遗留默认关闭。
+    permissions: isAdmin ? {
+      read: true,
+      download: true,
+      upload: true,
+      edit: true,
+      editMd: true,
+      share: true,
+    } : {
+      read: Boolean(row.can_read),
+      download: Boolean(row.can_read),
+      upload: Boolean(row.can_upload),
+      edit: Boolean(row.can_edit),
+      editMd: false,
+      share: false,
     },
     storageQuotaBytes: row.storage_quota_bytes,
     createdAt: row.created_at,

@@ -7,11 +7,19 @@ import { badRequest, conflict, notFound, unsupportedMediaType } from '../errors.
 import {
   extensionFromName,
   FileService,
+  isAllowedUploadExtension,
   normalizeFileName,
   normalizeMimeType,
 } from '../file-service.js';
 import type { LocalObjectStorage } from '../storage.js';
-import { requirePermission, type AuthenticatedRequest } from '../auth.js';
+import type { AuthenticatedRequest } from '../auth.js';
+import {
+  requireFilePermission,
+  requireFilePermissions,
+  requireFolderPermission,
+  requireRootPermission,
+} from '../authz.js';
+import { renderMarkdownPdf } from '../md-pdf.js';
 import type { FileRecord, ListFilesQuery } from '../types.js';
 
 const idSchema = z.string().uuid();
@@ -20,7 +28,7 @@ const optionalParentSchema = z.union([z.string().uuid(), z.null()]).optional();
 const listQuerySchema = z.object({
   parentId: z.string().uuid().optional(),
   q: z.string().max(200).optional(),
-  type: z.enum(['folder', 'image', 'audio', 'video', 'document', 'other']).optional(),
+  type: z.enum(['folder', 'text', 'document', 'image', 'audio', 'video', 'other']).optional(),
   sort: z.enum(['name', 'size', 'createdAt', 'updatedAt']).default('createdAt'),
   order: z.enum(['asc', 'desc']).default('desc'),
   page: z.coerce.number().int().min(1).default(1),
@@ -47,12 +55,21 @@ const copyFileSchema = z.object({
   name: z.string().min(1).max(240).optional(),
 });
 
+const contentUpdateSchema = z.object({
+  content: z.string().max(20 * 1024 * 1024),
+});
+
 interface RouteContext {
   config: AppConfig;
   db: HubDatabase;
   storage: LocalObjectStorage;
   files: FileService;
 }
+
+/** 文本内容/预览读取上限（防止大文件拖垮内存） */
+const MAX_TEXT_BYTES = 1024 * 1024;
+/** MD→PDF 源文件读取上限；超限拒绝导出 */
+const MAX_PDF_SOURCE_BYTES = 5 * 1024 * 1024;
 
 function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
   const result = schema.safeParse(value);
@@ -124,24 +141,46 @@ function sendRangeError(reply: FastifyReply, size: number): FastifyReply {
     .send({ error: { code: 'RANGE_NOT_SATISFIABLE', message: 'Range 超出文件范围' } });
 }
 
-export function registerFileRoutes(app: FastifyInstance, context: RouteContext): void {
-  const requireRead = async (request: FastifyRequest) => {
-    await requirePermission(context.db.sqlite, request, 'read');
-  };
-  const requireUpload = async (request: FastifyRequest) => {
-    await requirePermission(context.db.sqlite, request, 'upload');
-  };
-  const requireEdit = async (request: FastifyRequest) => {
-    await requirePermission(context.db.sqlite, request, 'edit');
-  };
+function isMarkdownFile(file: FileRecord): boolean {
+  const extension = (file.extension ?? '').toLowerCase();
+  return extension === 'md' || extension === 'markdown';
+}
 
-  app.get('/api/files', { preHandler: requireRead }, async (request) => {
+function watermarkTimestamp(now: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    + ` ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+
+export function registerFileRoutes(app: FastifyInstance, context: RouteContext): void {
+  // v0.1.2：对象级授权统一走 authz 模块（管理员绕过；目录链继承 + ROOT 兜底 + 遗留回退）。
+  const requireFile = (permission: Parameters<typeof requireFilePermission>[2]) => (
+    request: FastifyRequest,
+  ) => requireFilePermission(context.db.sqlite, request, permission, fileIdFromParams(request));
+
+  const requireFileAll = (permissions: Parameters<typeof requireFilePermissions>[2]) => (
+    request: FastifyRequest,
+  ) => requireFilePermissions(context.db.sqlite, request, permissions, fileIdFromParams(request));
+
+  const requireUploadAt = (request: FastifyRequest, parentId: string | null | undefined) => (
+    parentId
+      ? requireFolderPermission(context.db.sqlite, request, 'upload', parentId)
+      : requireRootPermission(context.db.sqlite, request, 'upload')
+  );
+
+  app.get('/api/files', async (request) => {
     const query = parseOrThrow(listQuerySchema, request.query, '查询参数无效') as ListFilesQuery;
+    if (query.parentId) {
+      await requireFolderPermission(context.db.sqlite, request, 'read', query.parentId);
+    } else {
+      await requireRootPermission(context.db.sqlite, request, 'read');
+    }
     return context.files.list(query);
   });
 
-  app.post('/api/files', { preHandler: requireUpload }, async (request) => {
+  app.post('/api/files', async (request) => {
     const input = parseOrThrow(createFolderSchema, request.body, '创建目录参数无效');
+    await requireUploadAt(request, input.parentId ?? null);
     const file = context.files.createFolder(input.parentId ?? null, input.name);
     logFileActivity(request, context.db, {
       action: 'create_folder',
@@ -151,15 +190,15 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     return { file };
   });
 
-  app.get('/api/files/:id', { preHandler: requireRead }, async (request) => {
+  app.get('/api/files/:id', { preHandler: requireFile('read') }, async (request) => {
     return { file: context.files.get(fileIdFromParams(request)) };
   });
 
-  app.get('/api/files/:id/path', { preHandler: requireRead }, async (request) => {
+  app.get('/api/files/:id/path', { preHandler: requireFile('read') }, async (request) => {
     return { path: context.files.getPath(fileIdFromParams(request)) };
   });
 
-  app.patch('/api/files/:id', { preHandler: requireEdit }, async (request) => {
+  app.patch('/api/files/:id', { preHandler: requireFile('edit') }, async (request) => {
     const input = parseOrThrow(updateFileSchema, request.body, '更新参数无效');
     const id = fileIdFromParams(request);
     const file = context.files.update(id, {
@@ -174,9 +213,11 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     return { file };
   });
 
-  app.post('/api/files/:id/move', { preHandler: requireEdit }, async (request) => {
+  app.post('/api/files/:id/move', { preHandler: requireFile('edit') }, async (request) => {
     const input = parseOrThrow(moveFileSchema, request.body, '移动参数无效');
-    const file = context.files.move(fileIdFromParams(request), input.parentId ?? null);
+    const id = fileIdFromParams(request);
+    await requireUploadAt(request, input.parentId ?? null);
+    const file = context.files.move(id, input.parentId ?? null);
     logFileActivity(request, context.db, {
       action: 'move',
       targetType: file.kind === 'folder' ? 'folder' : 'file',
@@ -185,9 +226,11 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     return { file };
   });
 
-  app.post('/api/files/:id/copy', { preHandler: requireEdit }, async (request) => {
+  app.post('/api/files/:id/copy', { preHandler: requireFile('edit') }, async (request) => {
     const input = parseOrThrow(copyFileSchema, request.body, '复制参数无效');
-    const file = context.files.copy(fileIdFromParams(request), input.parentId ?? null, input.name);
+    const id = fileIdFromParams(request);
+    await requireUploadAt(request, input.parentId ?? null);
+    const file = context.files.copy(id, input.parentId ?? null, input.name);
     logFileActivity(request, context.db, {
       action: 'copy',
       targetType: file.kind === 'folder' ? 'folder' : 'file',
@@ -196,7 +239,7 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     return { file };
   });
 
-  app.delete('/api/files/:id', { preHandler: requireEdit }, async (request) => {
+  app.delete('/api/files/:id', { preHandler: requireFile('edit') }, async (request) => {
     const id = fileIdFromParams(request);
     const file = context.files.get(id);
     await context.files.delete(id);
@@ -208,7 +251,92 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     return { ok: true };
   });
 
-  app.post('/api/uploads', { preHandler: requireUpload }, async (request, reply) => {
+  // ----- 文本内容 / 预览 / 在线编辑 / MD 导出（v0.1.2 §6–§7） -----
+
+  app.get('/api/files/:id/content', { preHandler: requireFile('read') }, async (request) => {
+    const id = fileIdFromParams(request);
+    const file = context.files.get(id);
+    if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
+    const result = await context.files.readText(id, MAX_TEXT_BYTES);
+    return {
+      fileId: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      content: result.content,
+      sizeBytes: result.sizeBytes,
+      encoding: result.encoding,
+      isBinary: result.isBinary,
+      truncated: result.truncated,
+    };
+  });
+
+  app.get('/api/files/:id/preview', { preHandler: requireFile('read') }, async (request) => {
+    const id = fileIdFromParams(request);
+    const file = context.files.get(id);
+    if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
+    const result = await context.files.readText(id, MAX_TEXT_BYTES);
+    if (result.isBinary) throw badRequest('该文件不是文本文件');
+    return {
+      fileId: file.id,
+      name: file.name,
+      kind: isMarkdownFile(file) ? 'markdown' : 'text',
+      content: result.content,
+      sizeBytes: result.sizeBytes,
+      truncated: result.truncated,
+    };
+  });
+
+  app.put('/api/files/:id/content', { preHandler: requireFile('editMd') }, async (request) => {
+    const id = fileIdFromParams(request);
+    const input = parseOrThrow(contentUpdateSchema, request.body, '内容参数无效');
+    const file = context.files.get(id);
+    if (!isMarkdownFile(file)) throw badRequest('仅支持编辑 Markdown 文件');
+    const updated = await context.files.updateContent(id, input.content);
+    logFileActivity(request, context.db, {
+      action: 'md_edit',
+      targetType: 'file',
+      targetName: file.name,
+    });
+    return { ok: true, file: updated };
+  });
+
+  app.get('/api/files/:id/export-pdf', { preHandler: requireFileAll(['read', 'download']) }, async (request, reply) => {
+    const id = fileIdFromParams(request);
+    const file = context.files.get(id);
+    if (!isMarkdownFile(file)) throw badRequest('仅支持导出 Markdown 文件');
+    const result = await context.files.readText(id, MAX_PDF_SOURCE_BYTES);
+    if (result.isBinary) throw badRequest('该文件不是文本文件');
+    if (result.truncated) throw badRequest('文件过大，无法导出 PDF');
+
+    const user = (request as AuthenticatedRequest).user;
+    const watermark = user
+      ? `${user.username} ${watermarkTimestamp(new Date())}`
+      : `导出 ${watermarkTimestamp(new Date())}`;
+    const pdf = await renderMarkdownPdf(result.content, {
+      title: file.name,
+      watermark,
+      cjkFontPath: context.config.pdfCjkFontPath,
+    });
+
+    logFileActivity(request, context.db, {
+      action: 'md_export',
+      targetType: 'file',
+      targetName: file.name,
+    });
+
+    const baseName = file.name.replace(/\.(md|markdown)$/i, '');
+    const encodedName = encodeURIComponent(baseName).replace(/'/g, '%27');
+    reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename*=UTF-8''${encodedName}.pdf`)
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'private, no-store');
+    return reply.send(pdf);
+  });
+
+  // ----- 上传（v0.1.2：目标目录 upload 授权 + 扩展名白名单） -----
+
+  app.post('/api/uploads', async (request, reply) => {
     if (!request.isMultipart()) throw unsupportedMediaType('请使用 multipart/form-data 上传文件');
 
     let stored: Awaited<ReturnType<LocalObjectStorage['storeStream']>> | undefined;
@@ -231,10 +359,17 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
 
       if (!stored) throw badRequest('请选择要上传的文件');
       const parentId = parseParentId(parentField);
+      // 授权在落库前完成：parentId 来自 multipart 字段（可能晚于文件流），
+      // 此处校验后若拒绝，将由下方 catch 清理已暂存对象。
+      await requireUploadAt(request, parentId ?? null);
       const requestedName = fieldValue(nameField) || uploadedFilename;
       if (!requestedName) throw badRequest('文件名无效');
       const safeName = normalizeFileName(requestedName);
       const mimeType = normalizeMimeType(safeName, claimedMimeType);
+      const extension = extensionFromName(safeName);
+      if (!isAllowedUploadExtension(extension)) {
+        throw unsupportedMediaType('该文件类型已被禁用（上传白名单）');
+      }
       if (mimeType === 'application/octet-stream' && !safeName.includes('.')) {
         throw unsupportedMediaType('无法识别文件类型，请提供扩展名');
       }
@@ -261,7 +396,7 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
         name: safeName,
         objectId: stored.objectId,
         mimeType,
-        extension: extensionFromName(safeName),
+        extension,
         sizeBytes: stored.sizeBytes,
         sha256: stored.sha256,
       }, (request as AuthenticatedRequest).user?.id);
@@ -282,7 +417,9 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     }
   });
 
-  app.get('/api/files/:id/download', { preHandler: requireRead }, async (request, reply) => {
+  // ----- 下载 / 预览流（v0.1.2：需 read + download；原始流可被保存，故 download=false 一律 403） -----
+
+  app.get('/api/files/:id/download', { preHandler: requireFileAll(['read', 'download']) }, async (request, reply) => {
     const file = context.files.get(fileIdFromParams(request));
     if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
     logFileActivity(request, context.db, {
@@ -293,7 +430,7 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     return sendFile(file, request, reply, true, context.storage);
   });
 
-  app.get('/api/files/:id/stream', { preHandler: requireRead }, async (request, reply) => {
+  app.get('/api/files/:id/stream', { preHandler: requireFileAll(['read', 'download']) }, async (request, reply) => {
     const file = context.files.get(fileIdFromParams(request));
     if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
     return sendFile(file, request, reply, false, context.storage);

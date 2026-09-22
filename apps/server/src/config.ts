@@ -21,6 +21,8 @@ const environmentSchema = z.object({
   TRUST_PROXY: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   LOG_FILE: z.string().min(1).optional(),
+  /** 可选：MD→PDF 导出使用的中文 TTF 字体路径（配合 pdf-lib + fontkit 嵌入） */
+  PDF_CJK_FONT: z.string().min(1).optional(),
 });
 
 export type NodeEnvironment = z.infer<typeof nodeEnvironmentSchema>;
@@ -43,6 +45,8 @@ export interface AppConfig {
   trustProxy: boolean | string | number;
   logLevel: string;
   logFile?: string;
+  /** MD→PDF 导出使用的中文 TTF 字体路径（可选） */
+  pdfCjkFontPath?: string;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -101,5 +105,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     trustProxy: parseTrustProxy(value.TRUST_PROXY),
     logLevel: value.LOG_LEVEL,
     logFile: value.LOG_FILE === undefined ? undefined : resolve(value.LOG_FILE),
+    pdfCjkFontPath: value.PDF_CJK_FONT === undefined ? undefined : resolve(value.PDF_CJK_FONT),
   };
 }

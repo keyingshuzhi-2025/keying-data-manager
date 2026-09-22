@@ -13,6 +13,8 @@ import { FileService } from './file-service.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerFileRoutes } from './routes/files.js';
+import { registerPublicShareRoutes } from './routes/public.js';
+import { registerShareRoutes } from './routes/shares.js';
 import { LocalObjectStorage } from './storage.js';
 
 export interface HubApp {
@@ -74,6 +76,8 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
   registerAuthRoutes(app, { config, db });
   registerAdminRoutes(app, { db });
   registerFileRoutes(app, { config, db, storage, files });
+  registerShareRoutes(app, { config, db, files });
+  registerPublicShareRoutes(app, { db, storage });
 
   const [temporaryUploadsRemoved, orphanedObjectsRemoved] = await Promise.all([
     storage.cleanupTemporaryUploads(),

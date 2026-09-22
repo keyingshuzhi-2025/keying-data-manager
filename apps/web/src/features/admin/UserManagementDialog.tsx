@@ -2,6 +2,8 @@ import { memo, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Eye,
+  Activity,
+  Gauge,
   Gift,
   KeyRound,
   LoaderCircle,
@@ -25,6 +27,8 @@ import type {
 } from '../../types';
 import { errorMessage, formatBytes, formatDate } from '../../utils/format';
 import { InvitesPanel } from './InvitesPanel';
+import { ActivityAuditPanel } from './ActivityAuditPanel';
+import { QuotaManagementPanel } from './QuotaManagementPanel';
 
 interface UserManagementDialogProps {
   currentUser: AuthUser;
@@ -48,9 +52,12 @@ const permissionLabels: Array<{
   title: string;
   description: string;
 }> = [
-  { key: 'read', title: '读取与下载', description: '浏览、预览，并下载文件到本地' },
+  { key: 'read', title: '读取', description: '浏览和预览文件' },
+  { key: 'download', title: '下载', description: '将文件保存到自己的设备' },
   { key: 'upload', title: '上传与创建', description: '上传文件、新建文件夹' },
   { key: 'edit', title: '编辑与删除', description: '重命名、移动、复制和删除' },
+  { key: 'editMd', title: 'Markdown 编辑', description: '在线修改 Markdown 内容' },
+  { key: 'share', title: '对外分享', description: '创建限时公开分享链接' },
 ];
 
 const UserPermissionRow = memo(function UserPermissionRow({
@@ -123,7 +130,7 @@ const UserPermissionRow = memo(function UserPermissionRow({
               checked={permissions[key]}
               onChange={(event) => setPermissions((current) => {
                 if (key === 'read' && !event.target.checked) {
-                  return { read: false, upload: false, edit: false };
+                  return { read: false, download: false, upload: false, edit: false, editMd: false, share: false };
                 }
                 return {
                   ...current,
@@ -207,7 +214,7 @@ function CreateUserDialog({ onClose, onCreated }: {
   const [password, setPassword] = useState('');
   const [isEnabled, setIsEnabled] = useState(true);
   const [permissions, setPermissions] = useState<AuthUser['permissions']>({
-    read: true, upload: true, edit: true,
+    read: true, download: true, upload: true, edit: true, editMd: false, share: false,
   });
 
   const create = useMutation({
@@ -275,7 +282,7 @@ function CreateUserDialog({ onClose, onCreated }: {
                 checked={permissions[key]}
                 onChange={(event) => setPermissions((current) => {
                   if (key === 'read' && !event.target.checked) {
-                    return { read: false, upload: false, edit: false };
+                    return { read: false, download: false, upload: false, edit: false, editMd: false, share: false };
                   }
                   return {
                     ...current,
@@ -522,7 +529,7 @@ function UserDetailsDialog({ user, currentUser, onClose }: {
 // ----- 主对话框 -----
 export function UserManagementDialog({ currentUser, onClose }: UserManagementDialogProps) {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'users' | 'invites'>('users');
+  const [tab, setTab] = useState<'users' | 'invites' | 'audit' | 'quota'>('users');
   const users = useQuery({
     queryKey: ['admin-users'],
     queryFn: api.listUsers,
@@ -638,15 +645,37 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
             >
               <Gift size={16} /> 邀请链接
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'audit'}
+              className={tab === 'audit' ? 'is-active' : ''}
+              onClick={() => setTab('audit')}
+            >
+              <Activity size={16} /> 活动审计
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'quota'}
+              className={tab === 'quota' ? 'is-active' : ''}
+              onClick={() => setTab('quota')}
+            >
+              <Gauge size={16} /> 存储配额
+            </button>
           </div>
 
           {tab === 'invites' ? (
             <InvitesPanel currentUser={currentUser} />
+          ) : tab === 'audit' ? (
+            <ActivityAuditPanel />
+          ) : tab === 'quota' ? (
+            <QuotaManagementPanel />
           ) : (
             <>
               <div className="permission-note">
                 <UsersRound size={20} />
-                <div><strong>读取权限包含下载</strong><span>获得读取权限的用户可将文件下载到自己的设备；上传和编辑会自动开启读取权限。</span></div>
+                <div><strong>六维权限独立控制</strong><span>读取、下载、上传、编辑、Markdown 编辑和对外分享分别授权；管理员始终拥有全部权限。</span></div>
               </div>
 
               <div className="user-management__toolbar">

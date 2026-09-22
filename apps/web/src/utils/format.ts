@@ -28,9 +28,9 @@ export function fileTypeOf(file: Pick<FileRecord, 'kind' | 'mimeType'>): FileTyp
   if (mime.startsWith('image/')) return 'image';
   if (mime.startsWith('audio/')) return 'audio';
   if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('text/')) return 'text';
   if (
-    mime.startsWith('text/')
-    || mime === 'application/pdf'
+    mime === 'application/pdf'
     || mime.includes('word')
     || mime.includes('excel')
     || mime.includes('spreadsheet')

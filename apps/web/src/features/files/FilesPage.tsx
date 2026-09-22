@@ -22,6 +22,8 @@ import { ApiError, api, uploadFile } from '../../api/client';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { ChangePasswordDialog } from '../auth/ChangePasswordDialog';
 import { UserManagementDialog } from '../admin/UserManagementDialog';
+import { FolderPermissionsDialog } from './FolderPermissionsDialog';
+import { ShareDialog } from '../shares/ShareDialog';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import type { AuthUser, FileRecord, FileType, SortField, SortOrder } from '../../types';
 import { errorMessage, formatBytes } from '../../utils/format';
@@ -77,10 +79,29 @@ export function FilesPage({
 }) {
   const queryClient = useQueryClient();
   const online = useOnlineStatus();
-  const canRead = user.permissions.read;
-  const canUpload = user.permissions.upload;
-  const canEdit = user.permissions.edit;
   const [folderId, setFolderId] = useState<string | null>(folderFromLocation);
+  const baseCanRead = user.permissions.read;
+  const folderAcl = useQuery({
+    queryKey: ['folder-permissions', folderId ?? 'ROOT'],
+    queryFn: () => api.getFolderPermissions(folderId ?? 'ROOT'),
+    enabled: online && baseCanRead,
+  });
+  const effectivePermissions = user.role === 'admin'
+    ? { read: true, download: true, upload: true, edit: true, editMd: true, share: true }
+    : (folderAcl.data?.acl.effective ?? {
+      read: baseCanRead,
+      download: Boolean(user.permissions.download ?? baseCanRead),
+      upload: Boolean(user.permissions.upload),
+      edit: Boolean(user.permissions.edit),
+      editMd: Boolean(user.permissions.editMd),
+      share: Boolean(user.permissions.share),
+    });
+  const canRead = Boolean(effectivePermissions.read);
+  const canUpload = Boolean(effectivePermissions.upload);
+  const canEdit = Boolean(effectivePermissions.edit);
+  const canDownload = Boolean(effectivePermissions.download);
+  const canEditMd = Boolean(effectivePermissions.editMd);
+  const canShare = Boolean(effectivePermissions.share);
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search.trim());
   const [type, setType] = useState<FileType | ''>('');
@@ -95,6 +116,8 @@ export function FilesPage({
   const [isUploading, setIsUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [showUserManagement, setShowUserManagement] = useState(false);
+  const [showFolderPermissions, setShowFolderPermissions] = useState(false);
+  const [shareTarget, setShareTarget] = useState<FileRecord | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
 
   const showToast = useCallback((text: string, tone: ToastMessage['tone'] = 'success') => {
@@ -328,9 +351,14 @@ export function FilesPage({
           <div className="topbar__spacer" />
           {!online ? <span className="offline-badge"><CloudOff size={15} />离线</span> : null}
           {user.role === 'admin' ? (
-            <button className="button button--secondary topbar-admin-button" type="button" onClick={() => setShowUserManagement(true)}>
-              <UserCog size={17} /><span>用户权限</span>
-            </button>
+            <>
+              <button className="button button--secondary topbar-admin-button" type="button" onClick={() => setShowFolderPermissions(true)}>
+                <FolderLock size={17} /><span>目录权限</span>
+              </button>
+              <button className="button button--secondary topbar-admin-button" type="button" onClick={() => setShowUserManagement(true)}>
+                <UserCog size={17} /><span>用户权限</span>
+              </button>
+            </>
           ) : null}
           <div className="user-chip"><span>{user.username.slice(0, 1).toUpperCase()}</span><div><strong>{user.username}</strong><small>{user.role === 'admin' ? '管理员' : '普通用户'}</small></div></div>
           <button className="icon-button" type="button" onClick={() => setShowChangePassword(true)} aria-label="修改密码" title="修改密码">
@@ -409,12 +437,15 @@ export function FilesPage({
                 files={currentItems}
                 view={view}
                 canEdit={canEdit}
+                canDownload={canDownload}
+                canShare={canShare}
                 onOpen={openFile}
                 onPreview={setPreview}
                 onRename={openRename}
                 onMove={openMove}
                 onCopy={openCopy}
                 onDelete={openDelete}
+                onShare={setShareTarget}
               />
             ) : null}
           </section>
@@ -449,7 +480,9 @@ export function FilesPage({
           pending={transferFile.isPending}
         />
       ) : null}
-      {preview ? <FilePreview file={preview} onClose={() => setPreview(null)} /> : null}
+      {preview ? <FilePreview file={preview} onClose={() => setPreview(null)} canDownload={canDownload} canEditMd={canEditMd} canShare={canShare} /> : null}
+      {shareTarget ? <ShareDialog file={shareTarget} onClose={() => setShareTarget(null)} /> : null}
+      {showFolderPermissions ? <FolderPermissionsDialog folderId={folderId ?? 'ROOT'} onClose={() => setShowFolderPermissions(false)} /> : null}
       {showUserManagement ? <UserManagementDialog currentUser={user} onClose={() => setShowUserManagement(false)} /> : null}
       {showChangePassword ? (
         <ChangePasswordDialog

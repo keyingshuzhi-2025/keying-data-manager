@@ -3,9 +3,20 @@ import { FolderLock, LoaderCircle } from 'lucide-react';
 import { ApiError, api } from './api/client';
 import { LoginPage } from './features/auth/LoginPage';
 import { FilesPage } from './features/files/FilesPage';
+import { PublicSharePage } from './features/shares/PublicSharePage';
 import type { SessionResponse } from './types';
 
-export function App() {
+function publicShareToken(): string | null {
+  const match = window.location.pathname.match(/^\/s\/([^/]+)\/?$/);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function AuthenticatedApp() {
   const queryClient = useQueryClient();
   const session = useQuery({
     queryKey: ['session'],
@@ -48,4 +59,10 @@ export function App() {
   }
 
   return <FilesPage user={session.data.user} onLogout={() => logout.mutate()} loggingOut={logout.isPending} />;
+}
+
+export function App() {
+  const token = publicShareToken();
+  if (token) return <PublicSharePage token={token} />;
+  return <AuthenticatedApp />;
 }

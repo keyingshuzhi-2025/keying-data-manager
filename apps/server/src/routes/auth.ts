@@ -46,10 +46,14 @@ const userSchema = z.object({
   isEnabled: z.boolean(),
   permissions: z.object({
     read: z.boolean(),
+    download: z.boolean(),
     upload: z.boolean(),
     edit: z.boolean(),
+    editMd: z.boolean(),
+    share: z.boolean(),
   }),
   storageQuotaBytes: z.number().int().min(0),
+  storageUsedBytes: z.number().int().min(0).optional(),
   createdAt: z.string(),
   lastLoginAt: z.string().nullable(),
 });

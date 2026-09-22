@@ -23,9 +23,18 @@ export type ActivityAction =
   | 'invite_revoke'
   | 'session_revoke'
   | 'sessions_revoke'
-  | 'quota_change';
+  | 'quota_change'
+  | 'acl_change'
+  | 'md_edit'
+  | 'md_export'
+  | 'share_create'
+  | 'share_update'
+  | 'share_revoke'
+  | 'share_delete'
+  | 'share_access'
+  | 'share_download';
 
-export type ActivityTargetType = 'file' | 'folder' | 'user' | 'invite';
+export type ActivityTargetType = 'file' | 'folder' | 'user' | 'invite' | 'share';
 
 export interface ActivityRecord {
   id: string;
@@ -50,6 +59,10 @@ export interface ActivityListParams {
   userId?: string;
   action?: string;
   q?: string;
+  /** 起始时间（ISO 字符串，含当天起始时刻）；筛选 created_at >= from */
+  from?: string;
+  /** 截止时间（ISO 字符串）；筛选 created_at <= to */
+  to?: string;
   page: number;
   limit: number;
 }
@@ -137,6 +150,14 @@ export function listActivity(
     clauses.push(`(u.username LIKE ? ESCAPE '\\' OR al.target_name LIKE ? ESCAPE '\\' OR al.detail LIKE ? ESCAPE '\\' OR al.action LIKE ? ESCAPE '\\')`);
     values.push(like, like, like, like);
   }
+  if (params.from) {
+    clauses.push('al.created_at >= ?');
+    values.push(params.from);
+  }
+  if (params.to) {
+    clauses.push('al.created_at <= ?');
+    values.push(params.to);
+  }
 
   const from = 'FROM activity_logs al JOIN users u ON u.id = al.user_id';
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -193,4 +214,13 @@ export const ACTIVITY_LABELS: Record<ActivityAction, string> = {
   session_revoke: '强制下线会话',
   sessions_revoke: '强制下线全部会话',
   quota_change: '调整存储配额',
+  acl_change: '调整文件夹权限',
+  md_edit: '编辑 Markdown',
+  md_export: '导出 PDF',
+  share_create: '创建分享链接',
+  share_update: '更新分享链接',
+  share_revoke: '撤销分享链接',
+  share_delete: '删除分享链接',
+  share_access: '访问分享链接',
+  share_download: '下载分享文件',
 };

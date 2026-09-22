@@ -5,6 +5,7 @@ import {
   Eye,
   FolderInput,
   Pencil,
+  Share2,
   Trash2,
 } from 'lucide-react';
 import { FileTypeIcon } from '../../components/FileTypeIcon';
@@ -15,19 +16,33 @@ interface FileListProps {
   files: FileRecord[];
   view: 'list' | 'grid';
   canEdit: boolean;
+  canDownload: boolean;
+  canShare: boolean;
   onOpen: (file: FileRecord) => void;
   onPreview: (file: FileRecord) => void;
   onRename: (file: FileRecord) => void;
   onMove: (file: FileRecord) => void;
   onCopy: (file: FileRecord) => void;
   onDelete: (file: FileRecord) => void;
+  onShare: (file: FileRecord) => void;
 }
 
 interface ActionsProps extends Omit<FileListProps, 'files' | 'view' | 'onOpen'> {
   file: FileRecord;
 }
 
-function FileActions({ file, canEdit, onPreview, onRename, onMove, onCopy, onDelete }: ActionsProps) {
+function FileActions({
+  file,
+  canEdit,
+  canDownload,
+  canShare,
+  onPreview,
+  onRename,
+  onMove,
+  onCopy,
+  onDelete,
+  onShare,
+}: ActionsProps) {
   return (
     <div
       className="file-actions"
@@ -39,10 +54,17 @@ function FileActions({ file, canEdit, onPreview, onRename, onMove, onCopy, onDel
           <button type="button" onClick={() => onPreview(file)} aria-label={`预览 ${file.name}`} title="预览">
             <Eye size={17} />
           </button>
-          <a href={`/api/files/${file.id}/download`} aria-label={`下载 ${file.name}`} title="下载">
-            <Download size={17} />
-          </a>
+          {canDownload ? (
+            <a href={`/api/files/${file.id}/download`} aria-label={`下载 ${file.name}`} title="下载">
+              <Download size={17} />
+            </a>
+          ) : null}
         </>
+      ) : null}
+      {canShare ? (
+        <button type="button" onClick={() => onShare(file)} aria-label={`分享 ${file.name}`} title="分享">
+          <Share2 size={17} />
+        </button>
       ) : null}
       {canEdit ? (
         <>

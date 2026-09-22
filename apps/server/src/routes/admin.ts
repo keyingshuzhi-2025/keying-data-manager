@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  listActivity,
   listActivityForUser,
   recordActivity,
 } from '../activity-log.js';
@@ -12,6 +13,13 @@ import {
   requireUser,
   type UserRow,
 } from '../auth.js';
+import {
+  noPermissions,
+  resolveConfiguredPermissionSource,
+  ROOT_FOLDER_ID,
+  type AuthzPermission,
+  type PermissionSet,
+} from '../authz.js';
 import type { HubDatabase } from '../db/database.js';
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
 
@@ -20,10 +28,19 @@ const updatePermissionsSchema = z.object({
   isEnabled: z.boolean().optional(),
   permissions: z.object({
     read: z.boolean(),
+    download: z.boolean(),
     upload: z.boolean(),
     edit: z.boolean(),
-  }).optional(),
-}).refine((value) => value.isEnabled !== undefined || value.permissions !== undefined, {
+    editMd: z.boolean(),
+    share: z.boolean(),
+  }).partial().optional(),
+  /** v0.1.2：存储配额上限字节数；>=0，0 表示不限制；不能低于已用空间（409） */
+  storageQuotaBytes: z.number().int().min(0).optional(),
+}).refine((value) => {
+  return value.isEnabled !== undefined
+    || value.permissions !== undefined
+    || value.storageQuotaBytes !== undefined;
+}, {
   message: '至少需要更新一项设置',
 });
 
@@ -39,6 +56,9 @@ const createUserSchema = z.object({
     read: z.boolean(),
     upload: z.boolean(),
     edit: z.boolean(),
+    download: z.boolean().optional(),
+    editMd: z.boolean().optional(),
+    share: z.boolean().optional(),
   }),
 });
 
@@ -60,11 +80,162 @@ const createInviteSchema = z.object({
     read: z.boolean(),
     upload: z.boolean(),
     edit: z.boolean(),
+    download: z.boolean().optional(),
+    editMd: z.boolean().optional(),
+    share: z.boolean().optional(),
   }),
   expiresInHours: z.number().int().min(1).max(24 * 365).optional(),
 });
 
 const inviteParamsSchema = z.object({ id: z.string().min(1).max(128) });
+
+// ----- v0.1.2：全局活动审计 / 文件夹级 ACL -----
+
+const activityQuerySchema = z.object({
+  userId: z.string().min(1).max(128).optional(),
+  action: z.string().min(1).max(64).optional(),
+  q: z.string().max(200).optional(),
+  from: z.string().min(1).max(64).optional(),
+  to: z.string().min(1).max(64).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+type ActivityQuery = z.output<typeof activityQuerySchema>;
+
+const aclQuerySchema = z.object({
+  folderId: z.string().min(1).max(128).optional(),
+});
+
+const aclPermissionsSchema = z.object({
+  read: z.boolean().optional(),
+  download: z.boolean().optional(),
+  upload: z.boolean().optional(),
+  edit: z.boolean().optional(),
+  editMd: z.boolean().optional(),
+  share: z.boolean().optional(),
+});
+
+const aclUpdateSchema = z.object({
+  folderId: z.string().min(1).max(128),
+  permissions: aclPermissionsSchema.optional(),
+  /** true = 恢复继承父目录（清空本目录显式设置） */
+  inheritParent: z.boolean().optional(),
+}).refine((value) => value.permissions !== undefined || value.inheritParent !== undefined, {
+  message: '至少需要设置权限或恢复继承',
+});
+
+/** 六维权限 → folder_permissions 列名（与 authz.PermissionSet 键一致，camelCase） */
+const ACL_COLUMN: Record<AuthzPermission, string> = {
+  read: 'can_read',
+  download: 'can_download',
+  upload: 'can_upload',
+  edit: 'can_edit',
+  editMd: 'can_edit_md',
+  share: 'can_share',
+};
+
+interface FolderAclRow {
+  folder_id: string;
+  can_read: number;
+  can_download: number;
+  can_upload: number;
+  can_edit: number;
+  can_edit_md: number;
+  can_share: number;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+function rowToPermissionSet(row: FolderAclRow): PermissionSet {
+  return {
+    read: Boolean(row.can_read),
+    download: Boolean(row.can_download),
+    upload: Boolean(row.can_upload),
+    edit: Boolean(row.can_edit),
+    editMd: Boolean(row.can_edit_md),
+    share: Boolean(row.can_share),
+  };
+}
+
+/** folderId 必须是 'ROOT' 或现存未删除目录，否则 404 */
+function assertAclFolder(context: RouteContext, folderId: string): void {
+  if (folderId === ROOT_FOLDER_ID) return;
+  const row = context.db.sqlite.prepare(
+    "SELECT id FROM files WHERE id = ? AND deleted_at IS NULL AND kind = 'folder'",
+  ).get(folderId);
+  if (!row) throw notFound('目录');
+}
+
+/** 读取某目录的显式 ACL 行（未设置时返回 null） */
+function explicitAclRow(context: RouteContext, folderId: string): FolderAclRow | null {
+  const row = context.db.sqlite.prepare(
+    `SELECT folder_id, can_read, can_download, can_upload, can_edit, can_edit_md, can_share,
+            updated_by, updated_at
+     FROM folder_permissions WHERE folder_id = ? LIMIT 1`,
+  ).get(folderId) as FolderAclRow | undefined;
+  return row ?? null;
+}
+
+/** 构造 ACL 读取响应（显式设置 + 继承解析后的生效权限） */
+function aclInfo(context: RouteContext, folderId: string) {
+  const explicit = explicitAclRow(context, folderId);
+  const resolved = resolveConfiguredPermissionSource(context.db.sqlite, {
+    kind: folderId === ROOT_FOLDER_ID ? 'root' : 'folder',
+    id: folderId,
+  });
+  return {
+    folderId,
+    permissions: explicit ? rowToPermissionSet(explicit) : null,
+    effective: resolved.permissions,
+    source: resolved.source,
+    sourceFolderId: resolved.folderId,
+    inheritParent: explicit === null,
+    updatedAt: explicit?.updated_at ?? null,
+  };
+}
+
+function usedBytes(context: RouteContext, userId: string): number {
+  const row = context.db.sqlite.prepare(
+    `SELECT COALESCE(SUM(size_bytes), 0) AS total
+     FROM files WHERE uploaded_by = ? AND kind = 'file' AND deleted_at IS NULL`,
+  ).get(userId) as { total: number } | undefined;
+  return row?.total ?? 0;
+}
+
+function mapUserWithUsage(context: RouteContext, row: UserRow) {
+  return { ...mapUser(row), storageUsedBytes: usedBytes(context, row.id) };
+}
+
+function csvCell(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+const activityCsv = (context: RouteContext, params: ActivityQuery) => {
+  const result = listActivity(context.db.sqlite, {
+    userId: params.userId,
+    action: params.action,
+    q: params.q,
+    from: params.from,
+    to: params.to,
+    page: params.page ?? 1,
+    limit: params.limit ?? 50,
+  });
+  const rows = [
+    ['时间', '用户', '操作', '对象类型', '对象', '详情'],
+    ...result.activities.map((record) => [
+      record.createdAt,
+      record.username ?? record.userId,
+      record.action,
+      record.targetType ?? '',
+      record.targetName ?? '',
+      record.detail ?? '',
+    ]),
+  ];
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}`;
+}
 
 interface RouteContext {
   db: HubDatabase;
@@ -142,12 +313,94 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
     await requireAdmin(context.db.sqlite, request);
   };
 
+  app.get('/api/admin/permissions', { preHandler: adminOnly }, async (request) => {
+    const input = parseOrThrow(aclQuerySchema, request.query, '权限查询参数无效');
+    const folderId = input.folderId ?? ROOT_FOLDER_ID;
+    assertAclFolder(context, folderId);
+    return { acl: aclInfo(context, folderId) };
+  });
+
+  app.put('/api/admin/permissions', { preHandler: adminOnly }, async (request) => {
+    const input = parseOrThrow(aclUpdateSchema, request.body, '权限设置无效');
+    assertAclFolder(context, input.folderId);
+    const actor = await requireUser(context.db.sqlite, request);
+    const now = new Date().toISOString();
+
+    const transaction = context.db.sqlite.transaction(() => {
+      if (input.inheritParent === true) {
+        context.db.sqlite.prepare('DELETE FROM folder_permissions WHERE folder_id = ?').run(input.folderId);
+      } else if (input.permissions) {
+        const current = explicitAclRow(context, input.folderId);
+        const values = current
+          ? rowToPermissionSet(current)
+          : { read: false, download: false, upload: false, edit: false, editMd: false, share: false };
+        const merged = { ...values, ...input.permissions };
+        context.db.sqlite.prepare(
+          `INSERT INTO folder_permissions
+             (folder_id, can_read, can_download, can_upload, can_edit, can_edit_md, can_share, updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(folder_id) DO UPDATE SET
+             can_read = excluded.can_read,
+             can_download = excluded.can_download,
+             can_upload = excluded.can_upload,
+             can_edit = excluded.can_edit,
+             can_edit_md = excluded.can_edit_md,
+             can_share = excluded.can_share,
+             updated_by = excluded.updated_by,
+             updated_at = excluded.updated_at`,
+        ).run(
+          input.folderId,
+          Number(merged.read),
+          Number(merged.download),
+          Number(merged.upload),
+          Number(merged.edit),
+          Number(merged.editMd),
+          Number(merged.share),
+          actor.id,
+          now,
+        );
+      }
+    });
+    transaction();
+    recordActivity(context.db.sqlite, {
+      userId: actor.id,
+      action: 'acl_change',
+      targetType: input.folderId === ROOT_FOLDER_ID ? 'folder' : 'folder',
+      targetName: input.folderId === ROOT_FOLDER_ID ? '根目录默认策略' : input.folderId,
+      detail: input.inheritParent === true ? '恢复继承父目录' : '更新文件夹权限',
+    });
+    return { acl: aclInfo(context, input.folderId) };
+  });
+
+  app.get('/api/admin/activity', { preHandler: adminOnly }, async (request) => {
+    const input = parseOrThrow(activityQuerySchema, request.query, '审计查询参数无效') as ActivityQuery;
+    return listActivity(context.db.sqlite, {
+      userId: input.userId,
+      action: input.action,
+      q: input.q,
+      from: input.from,
+      to: input.to,
+      page: input.page,
+      limit: input.limit,
+    });
+  });
+
+  app.get('/api/admin/activity/export', { preHandler: adminOnly }, async (request, reply) => {
+    const input = parseOrThrow(activityQuerySchema, request.query, '审计查询参数无效') as ActivityQuery;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+    reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="activity-audit-${stamp}.csv"`)
+      .header('Cache-Control', 'private, no-store');
+    return activityCsv(context, input);
+  });
+
   app.get('/api/admin/users', { preHandler: adminOnly }, async () => {
     const rows = context.db.sqlite.prepare(
       `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
        FROM users ORDER BY role ASC, created_at ASC`,
     ).all() as UserRow[];
-    return { users: rows.map(mapUser) };
+    return { users: rows.map((row) => mapUserWithUsage(context, row)) };
   });
 
   app.patch('/api/admin/users/:id', { preHandler: adminOnly }, async (request) => {
@@ -156,27 +409,31 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
     const current = getUser(context, id);
     if (current.role === 'admin') throw forbidden('管理员账号的权限不可修改');
 
-    const requestedPermissions = input.permissions ?? {
-      read: Boolean(current.can_read),
-      upload: Boolean(current.can_upload),
-      edit: Boolean(current.can_edit),
+    const requestedPermissions = input.permissions ?? {};
+    const permissions = {
+      read: requestedPermissions.read ?? Boolean(current.can_read),
+      download: requestedPermissions.download ?? Boolean(current.can_read),
+      upload: requestedPermissions.upload ?? Boolean(current.can_upload),
+      edit: requestedPermissions.edit ?? Boolean(current.can_edit),
+      editMd: requestedPermissions.editMd ?? false,
+      share: requestedPermissions.share ?? false,
     };
-    // The web interface uses read access as the entry point to every file operation.
-    // Keep the stored policy coherent even if an API client submits an inconsistent set.
-    const permissions = requestedPermissions.read
-      ? requestedPermissions
-      : { read: false, upload: false, edit: false };
     const isEnabled = input.isEnabled ?? Boolean(current.is_enabled);
+    const used = usedBytes(context, id);
+    if (input.storageQuotaBytes !== undefined && input.storageQuotaBytes > 0 && input.storageQuotaBytes < used) {
+      throw conflict('存储配额不能低于当前已用空间');
+    }
     const transaction = context.db.sqlite.transaction(() => {
       context.db.sqlite.prepare(
         `UPDATE users
-         SET is_enabled = ?, can_read = ?, can_upload = ?, can_edit = ?
+         SET is_enabled = ?, can_read = ?, can_upload = ?, can_edit = ?, storage_quota_bytes = ?
          WHERE id = ?`,
       ).run(
         Number(isEnabled),
         Number(permissions.read),
         Number(permissions.upload),
         Number(permissions.edit),
+        input.storageQuotaBytes ?? current.storage_quota_bytes,
         id,
       );
       if (!isEnabled) {
@@ -192,10 +449,9 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
         targetName: current.username,
       });
     }
-    return { user: mapUser(getUser(context, id)) };
+    return { user: mapUserWithUsage(context, getUser(context, id)) };
   });
 
-  // ----- 创建用户 -----
   app.post('/api/admin/users', { preHandler: adminOnly }, async (request, reply) => {
     const input = parseOrThrow(createUserSchema, request.body, '创建用户参数无效');
     const exists = context.db.sqlite.prepare(
@@ -292,7 +548,7 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
        FROM files WHERE deleted_at IS NULL AND kind = 'file'`,
     ).get() as { fileCount: number; totalBytes: number };
     return {
-      user: mapUser(user),
+      user: mapUserWithUsage(context, user),
       stats: {
         activeSessionCount: sessionCount,
         globalFileCount: fileStats.fileCount,

@@ -12,6 +12,7 @@ import { fileTypeOf } from '../utils/format';
 
 const icons: Record<FileType, LucideIcon> = {
   folder: Folder,
+  text: FileText,
   image: FileImage,
   audio: FileAudio,
   video: FileVideo,

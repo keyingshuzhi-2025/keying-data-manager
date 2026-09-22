@@ -449,6 +449,11 @@ tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-ac
 .preview-meta dd { margin: 0; overflow-wrap: anywhere; color: #46534d; font-size: 0.72rem; line-height: 1.4; }
 .preview-meta dd.hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .preview-meta .button { margin-top: auto; }
+.markdown-editor { display: grid; grid-template-rows: 1fr auto; width: 100%; height: 68vh; min-height: 460px; background: white; }
+.markdown-editor textarea { width: 100%; min-height: 0; resize: none; padding: 22px; border: 0; outline: 0; color: var(--ink); background: white; font: 14px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.markdown-editor__actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--line); background: #f8f7f2; }
+.markdown-preview { width: 100%; max-height: 68vh; overflow: auto; padding: 28px; background: white; color: var(--ink); }
+.markdown-plain { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
 /* User administration */
 .user-management { display: grid; gap: 14px; }

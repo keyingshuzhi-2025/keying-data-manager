@@ -22,8 +22,11 @@ const permissionLabels: Array<{
   title: string;
 }> = [
   { key: 'read', title: '读取' },
+  { key: 'download', title: '下载' },
   { key: 'upload', title: '上传' },
   { key: 'edit', title: '编辑' },
+  { key: 'editMd', title: 'Markdown 编辑' },
+  { key: 'share', title: '对外分享' },
 ];
 
 const expiryOptions: Array<{ value: number | null; label: string }> = [
@@ -79,7 +82,7 @@ export function InvitesPanel({ currentUser }: InvitesPanelProps) {
   const invites = useQuery({ queryKey: ['admin-invites'], queryFn: api.listInvites });
 
   const [permissions, setPermissions] = useState<AuthUser['permissions']>({
-    read: true, upload: true, edit: true,
+    read: true, download: true, upload: true, edit: true, editMd: false, share: false,
   });
   const [expiresInHours, setExpiresInHours] = useState<number | null>(24);
 
@@ -120,7 +123,7 @@ export function InvitesPanel({ currentUser }: InvitesPanelProps) {
                     checked={permissions[key]}
                     onChange={(event) => setPermissions((current) => {
                       if (key === 'read' && !event.target.checked) {
-                        return { read: false, upload: false, edit: false };
+                        return { read: false, download: false, upload: false, edit: false, editMd: false, share: false };
                       }
                       return {
                         ...current,

@@ -9,11 +9,12 @@ import {
   rename,
   stat,
   unlink,
+  writeFile,
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { payloadTooLarge, storageError } from './errors.js';
+import { notFound, payloadTooLarge, storageError } from './errors.js';
 import type { StoredObject } from './types.js';
 
 const objectIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -78,6 +79,50 @@ export class LocalObjectStorage {
 
   async stat(objectId: string) {
     return stat(this.pathForObjectId(objectId));
+  }
+
+  /**
+   * 读取对象为内存缓冲（文本内容/预览用）。超过 maxBytes 时截断并标记 truncated，
+   * 防止大文件拖垮内存；对象缺失抛 404。
+   */
+  async readBytes(objectId: string, maxBytes: number): Promise<{ data: Buffer; truncated: boolean }> {
+    const stream = this.read(objectId);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let truncated = false;
+    try {
+      for await (const chunk of stream) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = maxBytes + 1 - total;
+        if (buffer.length >= remaining) {
+          chunks.push(buffer.subarray(0, Math.max(0, remaining)));
+          truncated = true;
+          stream.destroy();
+          break;
+        }
+        chunks.push(buffer);
+        total += buffer.length;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw notFound('文件内容');
+      throw storageError('读取文件内容失败', error instanceof Error ? error.message : error);
+    }
+    return { data: Buffer.concat(chunks), truncated };
+  }
+
+  /** 直接覆盖写入对象（在线编辑文本/MD 用）；返回新的大小与 sha256。 */
+  async writeObject(objectId: string, data: Buffer): Promise<{ sizeBytes: number; sha256: string }> {
+    const objectPath = this.pathForObjectId(objectId);
+    try {
+      mkdirSync(dirname(objectPath), { recursive: true });
+      await writeFile(objectPath, data);
+      return {
+        sizeBytes: data.length,
+        sha256: createHash('sha256').update(data).digest('hex'),
+      };
+    } catch (error) {
+      throw storageError('写入文件内容失败', error instanceof Error ? error.message : error);
+    }
   }
 
   async remove(objectId: string): Promise<void> {
