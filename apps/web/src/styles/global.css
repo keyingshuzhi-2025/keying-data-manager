@@ -307,9 +307,9 @@ select:focus-visible {
 .content-heading { display: grid; gap: 25px; }
 .content-heading__title { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 .content-heading h1 { margin: 7px 0 0; font-size: clamp(2rem, 4vw, 3.4rem); font-weight: 630; letter-spacing: -0.055em; line-height: 1; }
-.folder-summary { display: flex; gap: 24px; color: var(--muted); font-size: 0.75rem; }
-.folder-summary span { display: grid; gap: 3px; }
-.folder-summary strong { color: var(--ink); font-size: 0.92rem; }
+.folder-summary { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 0.75rem; }
+.folder-summary span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; color: #52615a; background: white; border: 1px solid var(--line); border-radius: 999px; }
+.folder-summary strong { color: var(--ink); font-size: 0.8rem; }
 
 .breadcrumbs { display: flex; min-width: 0; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .breadcrumbs::-webkit-scrollbar { display: none; }
@@ -379,7 +379,7 @@ select:focus-visible {
 .file-type-icon--document { color: #43658f; background: #e1e9f3; }
 .file-type-icon--other { color: #65706b; background: #e7e9e6; }
 
-.file-actions { display: flex; align-items: center; justify-content: flex-end; gap: 1px; opacity: 0.38; transition: opacity 120ms ease; }
+.file-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; opacity: 0.6; transition: opacity 120ms ease; }
 tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-actions, .file-card:focus-within .file-actions { opacity: 1; }
 .file-actions button, .file-actions a { display: grid; width: 31px; height: 31px; padding: 0; place-items: center; color: #68756f; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
 .file-actions button:hover, .file-actions a:hover { color: var(--green-900); background: #edf1ed; }
@@ -397,7 +397,8 @@ tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-ac
 .file-card__footer .file-actions button, .file-card__footer .file-actions a { width: 28px; height: 28px; }
 
 .pagination { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 18px; color: var(--muted); font-size: 0.74rem; }
-.pagination button { min-height: 35px; padding: 0 12px; color: var(--green-900); background: white; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
+.pagination button { min-height: 36px; padding: 0 14px; color: var(--green-900); background: white; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-weight: 600; transition: border-color .15s ease, background .15s ease; }
+.pagination button:hover:not(:disabled) { border-color: #9fc4a6; background: #f6faf7; }
 .pagination button:disabled { opacity: 0.4; cursor: default; }
 
 /* Dialogs */
@@ -498,6 +499,35 @@ tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-ac
 .user-access-row .permission-grid .permission-card { padding: 10px 12px; }
 .user-access-row .permission-grid .permission-card__text strong { font-size: 0.74rem; }
 .user-access-row .permission-grid .permission-card__text small { font-size: 0.62rem; }
+
+/* ----- 用户行权限摘要（chip + 编辑按钮） ----- */
+.user-access-row__perms {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 13px;
+  padding: 11px 13px;
+  background: #f7f9f5;
+  border: 1px solid #e3e8e1;
+  border-radius: 12px;
+}
+.user-access-row__perms-label { color: #87918c; font-size: 0.66rem; font-weight: 700; letter-spacing: .04em; }
+.user-access-row__perms-summary { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
+.perm-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  color: #7a857f;
+  background: #f0f2ee;
+  border: 1px solid #dfe3dc;
+  border-radius: 999px;
+  font-size: 0.67rem;
+  font-weight: 600;
+}
+.perm-chip.is-on { color: #1f5133; background: #e2f2e6; border-color: #bcd8c5; }
+.button--sm { min-height: 32px; padding: 0 12px; font-size: 0.7rem; }
+.field-hint { color: var(--muted); font-size: 0.66rem; line-height: 1.5; }
 
 .user-management__state { min-height: 150px; }
 .user-access-list { display: grid; gap: 12px; }

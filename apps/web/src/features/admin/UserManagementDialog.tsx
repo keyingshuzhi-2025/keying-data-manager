@@ -8,6 +8,7 @@ import {
   Gift,
   KeyRound,
   LoaderCircle,
+  Pencil,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -32,6 +33,7 @@ import { ActivityAuditPanel } from './ActivityAuditPanel';
 import { QuotaManagementPanel } from './QuotaManagementPanel';
 import { WatermarkConfigPanel } from './WatermarkConfigPanel';
 import { PermissionGrid, PERMISSION_DEFINITIONS, permissionSummaryText, type PermissionDefinition } from '../common/PermissionCard';
+import { PermissionEditorModal } from './PermissionEditorModal';
 import type { PermissionSet } from '../../types';
 
 interface UserManagementDialogProps {
@@ -51,17 +53,9 @@ interface UserPermissionRowProps {
   onViewDetails: (user: AuthUser) => void;
 }
 
-const permissionLabels: Array<{
-  key: keyof AuthUser['permissions'];
-  title: string;
-  description: string;
-}> = PERMISSION_DEFINITIONS.filter((d: PermissionDefinition) =>
-  ['read', 'upload', 'edit'].includes(d.key),
-) as Array<{
-  key: keyof AuthUser['permissions'];
-  title: string;
-  description: string;
-}>;
+const permissionLabels = PERMISSION_DEFINITIONS.filter(
+  (d: PermissionDefinition) => ['read', 'upload', 'edit'].includes(d.key),
+);
 
 /** 下载 / Markdown 编辑 / 分享由文件夹级 ACL 控制，不在此处全局设置。 */
 const aclNote = '下载、Markdown 编辑与对外分享权限由文件夹级 ACL 控制（管理员可绕过）。';
@@ -76,19 +70,17 @@ const UserPermissionRow = memo(function UserPermissionRow({
   onReset,
   onDelete,
   onViewDetails,
-}: UserPermissionRowProps) {
+  onEditPermissions,
+}: UserPermissionRowProps & { onEditPermissions: (user: AuthUser) => void }) {
   const [isEnabled, setIsEnabled] = useState(user.isEnabled);
-  const [permissions, setPermissions] = useState(user.permissions);
 
   useEffect(() => {
     setIsEnabled(user.isEnabled);
-    setPermissions(user.permissions);
-  }, [user]);
+  }, [user.isEnabled]);
 
   const isAdmin = user.role === 'admin';
   const isSelf = user.id === currentUser.id;
-  const dirty = isEnabled !== user.isEnabled
-    || permissionLabels.some(({ key }) => permissions[key] !== user.permissions[key]);
+  const dirty = isEnabled !== user.isEnabled;
   const selectable = !isAdmin && !isSelf;
 
   return (
@@ -128,12 +120,23 @@ const UserPermissionRow = memo(function UserPermissionRow({
         </label>
       </header>
 
-      <div className="permission-options">
-        <PermissionGrid
-          permissions={permissions as PermissionSet}
-          onChange={(next: AuthUser['permissions']) => setPermissions(next)}
-          disabled={isAdmin || !isEnabled || saving}
-        />
+      <div className="user-access-row__perms">
+        <span className="user-access-row__perms-label">权限</span>
+        <div className="user-access-row__perms-summary">
+          {permissionLabels.map(({ key, title }) => (
+            <span key={key} className={`perm-chip ${user.permissions[key] ? 'is-on' : ''}`} title={`${title}：${user.permissions[key] ? '已开启' : '已关闭'}`}>
+              {title}
+            </span>
+          ))}
+        </div>
+        <button
+          className="button button--secondary button--sm"
+          type="button"
+          onClick={() => onEditPermissions(user)}
+          disabled={saving}
+        >
+          <Pencil size={14} /> 编辑权限
+        </button>
       </div>
 
       <footer className="user-access-row__footer">
@@ -184,7 +187,7 @@ const UserPermissionRow = memo(function UserPermissionRow({
               className="button button--primary"
               type="button"
               disabled={!dirty || saving}
-              onClick={() => onSave(user.id, { isEnabled, permissions })}
+              onClick={() => onSave(user.id, { isEnabled, permissions: user.permissions })}
             >
               {saving ? <LoaderCircle className="spin" size={17} /> : null}
               {saving ? '保存中…' : '保存设置'}
@@ -269,7 +272,9 @@ function CreateUserDialog({ onClose, onCreated }: {
           <PermissionGrid
             permissions={permissions as PermissionSet}
             onChange={(next: AuthUser['permissions']) => setPermissions(next)}
+            permissionsDef={permissionLabels}
           />
+          <small className="field-hint">{aclNote}</small>
         </fieldset>
         <div className="user-create-form__footer">
           <button className="button button--secondary" type="button" onClick={onClose}>取消</button>
@@ -537,6 +542,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
   const [deleteTarget, setDeleteTarget] = useState<AuthUser | null>(null);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [detailsTarget, setDetailsTarget] = useState<AuthUser | null>(null);
+  const [permsTarget, setPermsTarget] = useState<AuthUser | null>(null);
 
   const filteredUsers = useMemo(() => {
     if (!users.data) return [] as AuthUser[];
@@ -789,6 +795,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
                     onReset={(u) => setResetTarget(u)}
                     onDelete={(u) => setDeleteTarget(u)}
                     onViewDetails={(u) => setDetailsTarget(u)}
+                    onEditPermissions={(u) => setPermsTarget(u)}
                   />
                 ))}
               </div>
@@ -853,6 +860,18 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
           onClose={() => {
             setDetailsTarget(null);
             void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+          }}
+        />
+      ) : null}
+      {permsTarget ? (
+        <PermissionEditorModal
+          user={permsTarget}
+          initialPermissions={permsTarget.permissions}
+          onClose={() => setPermsTarget(null)}
+          saving={updateAccess.isPending && updateAccess.variables?.id === permsTarget.id}
+          onSave={(permissions) => {
+            updateAccess.mutate({ id: permsTarget.id, update: { isEnabled: permsTarget.isEnabled, permissions } });
+            setPermsTarget(null);
           }}
         />
       ) : null}
