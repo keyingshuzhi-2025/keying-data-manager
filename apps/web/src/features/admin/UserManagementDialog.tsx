@@ -605,7 +605,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
         title="用户与权限"
         description="管理账号、角色、存储配额与水印配置。全局权限仅读取/上传/编辑；下载、Markdown 编辑与分享由文件夹级 ACL 控制。"
         onClose={onClose}
-        size="large"
+        size="xlarge"
       >
         <div className="user-management">
           <div className="user-management__tabs" role="tablist" aria-label="管理视图">

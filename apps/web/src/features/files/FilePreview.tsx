@@ -7,6 +7,7 @@ import {
   FolderLock,
   Link2,
   LoaderCircle,
+  Pencil,
   Save,
   Share2,
 } from 'lucide-react';
@@ -94,100 +95,115 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
   return (
     <Modal title={file.name} description="文件预览与属性" onClose={onClose} size="large">
       <div className="preview-layout">
-        <div className={`preview-stage preview-stage--${type}`}>
-          {isMarkdown && editorOpen ? (
-            <div className="markdown-editor">
-              <textarea
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                spellCheck={false}
-                aria-label="Markdown 内容"
-              />
-              <div className="markdown-editor__actions">
-                <button className="button button--secondary" type="button" onClick={() => setEditorOpen(false)}>返回预览</button>
-                <button className="button button--primary" type="button" onClick={submit} disabled={save.isPending}>
-                  {save.isPending ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {type === 'image' ? <img src={streamUrl} alt={file.name} /> : null}
-          {type === 'audio' ? <audio src={streamUrl} controls autoPlay={false}>浏览器不支持音频播放。</audio> : null}
-          {type === 'video' ? <video src={streamUrl} controls playsInline>浏览器不支持视频播放。</video> : null}
-          {type === 'document' && file.mimeType === 'application/pdf' ? (
-            <iframe src={streamUrl} title={`${file.name} PDF 预览`} />
-          ) : null}
-          {isText && !isMarkdown ? (
-            <iframe className="text-preview" sandbox="" src={streamUrl} title={`${file.name} 文本预览`} />
-          ) : null}
-          {isMarkdown && !editorOpen ? (
-            <div className="markdown-preview">
-              {contentQuery.isPending ? <div className="surface-state"><LoaderCircle className="spin" size={24} />正在读取内容…</div> : null}
-              {contentQuery.isError ? <div className="notice notice--error" role="alert">{errorMessage(contentQuery.error)}</div> : null}
-              {contentQuery.data ? <pre className="markdown-plain">{contentQuery.data.content}</pre> : null}
-            </div>
-          ) : null}
-          {(type === 'other'
-            || (type === 'document' && file.mimeType !== 'application/pdf' && !file.mimeType?.startsWith('text/')))
-            ? (
-              <div className="preview-fallback">
-                <FileQuestion size={48} strokeWidth={1.4} />
-                <strong>此格式无法在浏览器中直接预览</strong>
-                <span>下载后使用本地应用打开。</span>
+        <div className="preview-top">
+          <div className={`preview-stage preview-stage--${type}`}>
+            {isMarkdown && editorOpen ? (
+              <div className="markdown-editor">
+                <textarea
+                  value={content}
+                  onChange={(event) => setContent(event.target.value)}
+                  spellCheck={false}
+                  aria-label="Markdown 内容"
+                />
+                <div className="markdown-editor__actions">
+                  <button className="button button--secondary" type="button" onClick={() => setEditorOpen(false)}>返回预览</button>
+                  <button className="button button--primary" type="button" onClick={submit} disabled={save.isPending}>
+                    {save.isPending ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存
+                  </button>
+                </div>
               </div>
             ) : null}
-        </div>
-        <aside className="preview-meta">
-          <div className="preview-meta__title"><FileTypeIcon file={file} size={26} /><strong>{file.name}</strong></div>
-          <dl>
-            <div><dt>类型</dt><dd>{file.mimeType ?? '未知'}</dd></div>
-            <div><dt>大小</dt><dd>{formatBytes(file.sizeBytes)}</dd></div>
-            <div><dt>修改时间</dt><dd>{formatDate(file.updatedAt)}</dd></div>
-            <div><dt>校验值</dt><dd className="hash" title={file.sha256 ?? undefined}>{file.sha256?.slice(0, 16) ?? '—'}</dd></div>
-          </dl>
-          <div className="preview-meta__actions">
-            <a className="button button--secondary" href={fileStreamUrl(file.id)} target="_blank" rel="noopener noreferrer" title="在新标签页中打开">
-              <ExternalLink size={15} /> 新标签页打开
-            </a>
-            <button
-              className="button button--secondary"
-              type="button"
-              onClick={async () => {
-                const ok = await copyToClipboard(fileStreamUrl(file.id));
-                setToast({ id: Date.now(), text: ok ? '文件链接已复制' : '复制失败，请手动复制', tone: ok ? 'success' : 'error' });
-              }}
-              title="复制文件流链接"
-            >
-              <Link2 size={15} /> 复制链接
-            </button>
+            {type === 'image' ? <img src={streamUrl} alt={file.name} /> : null}
+            {type === 'audio' ? <audio src={streamUrl} controls autoPlay={false}>浏览器不支持音频播放。</audio> : null}
+            {type === 'video' ? <video src={streamUrl} controls playsInline>浏览器不支持视频播放。</video> : null}
+            {type === 'document' && file.mimeType === 'application/pdf' ? (
+              <iframe src={streamUrl} title={`${file.name} PDF 预览`} />
+            ) : null}
+            {isText && !isMarkdown ? (
+              <iframe className="text-preview" sandbox="" src={streamUrl} title={`${file.name} 文本预览`} />
+            ) : null}
+            {isMarkdown && !editorOpen ? (
+              <div className="markdown-preview">
+                {contentQuery.isPending ? <div className="surface-state"><LoaderCircle className="spin" size={24} />正在读取内容…</div> : null}
+                {contentQuery.isError ? <div className="notice notice--error" role="alert">{errorMessage(contentQuery.error)}</div> : null}
+                {contentQuery.data ? <pre className="markdown-plain">{contentQuery.data.content}</pre> : null}
+              </div>
+            ) : null}
+            {(type === 'other'
+              || (type === 'document' && file.mimeType !== 'application/pdf' && !file.mimeType?.startsWith('text/')))
+              ? (
+                <div className="preview-fallback">
+                  <FileQuestion size={48} strokeWidth={1.4} />
+                  <strong>此格式无法在浏览器中直接预览</strong>
+                  <span>下载后使用本地应用打开。</span>
+                </div>
+              ) : null}
           </div>
-          {canEditMd && isMarkdown ? (
-            <button className="button button--secondary button--wide" type="button" onClick={() => setEditorOpen(true)}>编辑 Markdown</button>
-          ) : null}
-          {canDownload ? (
-            <>
-              <a className="button button--primary button--wide" href={`/api/files/${file.id}/download`}><Download size={18} />下载文件</a>
-              {isMarkdown ? <a className="button button--secondary button--wide" href={fileExportPdfUrl(file.id)}>导出 PDF</a> : null}
-            </>
-          ) : null}
-          <button className="button button--ghost button--wide" type="button" onClick={() => share.mutate()} disabled={share.isPending}>
-            <Share2 size={17} />创建 7 天分享
-          </button>
+          <aside className="preview-meta">
+            <div className="preview-meta__title"><FileTypeIcon file={file} size={26} /><strong>{file.name}</strong></div>
+            <dl>
+              <div><dt>类型</dt><dd>{file.mimeType ?? '未知'}</dd></div>
+              <div><dt>大小</dt><dd>{formatBytes(file.sizeBytes)}</dd></div>
+              <div><dt>修改时间</dt><dd>{formatDate(file.updatedAt)}</dd></div>
+              <div><dt>校验值</dt><dd className="hash" title={file.sha256 ?? undefined}>{file.sha256?.slice(0, 16) ?? '—'}</dd></div>
+            </dl>
+            <div className="preview-meta__actions">
+              <a className="button button--secondary" href={fileStreamUrl(file.id)} target="_blank" rel="noopener noreferrer" title="在新标签页中打开">
+                <ExternalLink size={15} /> 新标签页打开
+              </a>
+              <button
+                className="button button--secondary"
+                type="button"
+                onClick={async () => {
+                  const ok = await copyToClipboard(fileStreamUrl(file.id));
+                  setToast({ id: Date.now(), text: ok ? '文件链接已复制' : '复制失败，请手动复制', tone: ok ? 'success' : 'error' });
+                }}
+                title="复制文件流链接"
+              >
+                <Link2 size={15} /> 复制链接
+              </button>
+            </div>
+            {canEditMd && isMarkdown ? (
+              <button className="button button--secondary button--wide" type="button" onClick={() => setEditorOpen(true)}>编辑 Markdown</button>
+            ) : null}
+            {canDownload ? (
+              <>
+                <a className="button button--primary button--wide" href={`/api/files/${file.id}/download`}><Download size={18} />下载文件</a>
+                {isMarkdown ? <a className="button button--secondary button--wide" href={fileExportPdfUrl(file.id)}>导出 PDF</a> : null}
+              </>
+            ) : null}
+            <button className="button button--ghost button--wide" type="button" onClick={() => share.mutate()} disabled={share.isPending}>
+              <Share2 size={17} />创建 7 天分享
+            </button>
+          </aside>
+        </div>
+
+        <section className="preview-extras">
           {shareUrl ? (
             <div className="notice notice--invite" role="status">
               <span>已为“{file.name}”生成分享链接（令牌标识，匿名访问）：</span>
               <code title={shareUrl}>{shareUrl}</code>
             </div>
           ) : null}
-          <div className="notice notice--invite">
-            <FolderLock size={17} />
-            <div>
-              <strong>目录权限卡片</strong>
-              <span>以下为当前目录生效的权限；点击下方按钮修改目录级权限。</span>
+          <div className="preview-perms">
+            <div className="preview-perms__head">
+              <div className="preview-perms__title">
+                <FolderLock size={16} />
+                <strong>目录权限</strong>
+                <span>当前目录生效的权限（只读）</span>
+              </div>
+              <button
+                className="button button--secondary button--sm"
+                type="button"
+                onClick={() => setFolderPermissionsOpen(true)}
+              >
+                <Pencil size={14} /> 设置目录权限
+              </button>
             </div>
+            <PermissionGrid permissions={filePermissions} onChange={() => setFolderPermissionsOpen(true)} disabled />
           </div>
-          <PermissionGrid permissions={filePermissions} onChange={() => setFolderPermissionsOpen(true)} disabled />
-        </aside>
+        </section>
+
         {folderPermissionsOpen ? (
           <FolderPermissionsDialog
             folderId={file.parentId ?? 'ROOT'}
