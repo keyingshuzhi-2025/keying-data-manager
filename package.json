@@ -8,18 +8,18 @@
   },
   "scripts": {
     "dev": "concurrently --kill-others -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "tsx watch apps/server/src/index.ts",
+    "dev:server": "D:\\Program Files\\@deepseek-aidsh-desktop-app\\resources\\runtime\\node.exe node_modules/tsx/dist/cli.mjs watch apps/server/src/index.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc -p apps/server/tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
-    "start": "node dist/apps/server/src/index.js",
-    "backup": "tsx scripts/backup.ts",
+    "start": "D:\\Program Files\\@deepseek-aidsh-desktop-app\\resources\\runtime\\node.exe dist/apps/server/src/index.js",
+    "backup": "D:\\Program Files\\@deepseek-aidsh-desktop-app\\resources\\runtime\\node.exe node_modules/tsx/dist/cli.mjs scripts/backup.ts",
     "typecheck": "npm run typecheck:server && npm run typecheck:web",
     "typecheck:server": "tsc --noEmit -p apps/server/tsconfig.json",
     "typecheck:web": "tsc --noEmit -p apps/web/tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "D:\\Program Files\\@deepseek-aidsh-desktop-app\\resources\\runtime\\node.exe node_modules/vitest/vitest.mjs run",
+    "test:watch": "D:\\Program Files\\@deepseek-aidsh-desktop-app\\resources\\runtime\\node.exe node_modules/vitest/vitest.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
