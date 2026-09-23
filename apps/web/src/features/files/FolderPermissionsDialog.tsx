@@ -60,11 +60,16 @@ export function FolderPermissionsDialog({
   const acl = query.data?.acl;
   const [permissions, setPermissions] = useState<PermissionSet | null>(null);
   useEffect(() => {
-    if (acl?.permissions) setPermissions({ ...acl.permissions });
-  }, [acl?.permissions]);
+    if (acl?.permissions) {
+      setPermissions({ ...acl.permissions });
+    } else if (acl?.effective) {
+      setPermissions({ ...acl.effective });
+    }
+  }, [acl?.permissions, acl?.effective]);
 
   const effective = useMemo<PermissionSet | undefined>(() => acl?.effective, [acl?.effective]);
-  const dirty = Boolean(permissions && acl?.permissions && permissionLabels.some(({ key }) => permissions[key] !== acl.permissions?.[key]));
+  const effectiveForDirty = acl?.permissions ?? acl?.effective;
+  const dirty = Boolean(permissions && effectiveForDirty && permissionLabels.some(({ key }) => permissions[key] !== effectiveForDirty[key]));
   const busy = update.isPending || inherit.isPending;
 
   const submit = (event: FormEvent) => {

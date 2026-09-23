@@ -25,6 +25,7 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
   const [content, setContent] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const contentQuery = useQuery({
     queryKey: ['file-content', file.id],
     queryFn: () => api.previewFile(file.id),
@@ -44,6 +45,7 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
     mutationFn: () => api.createShareLink({ fileId: file.id, expiresIn: '7d', maxAccesses: null, password: null }),
     onSuccess: (result) => {
       const url = /^https?:\/\//i.test(result.url) ? result.url : new URL(result.url, window.location.origin).toString();
+      setShareUrl(url);
       void navigator.clipboard?.writeText(url).catch(() => undefined);
       setToast({ id: Date.now(), text: '分享链接已创建并复制到剪贴板', tone: 'success' });
     },
@@ -130,6 +132,12 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
           <button className="button button--ghost button--wide" type="button" onClick={() => share.mutate()} disabled={share.isPending}>
             <Share2 size={17} />创建 7 天分享
           </button>
+          {shareUrl ? (
+            <div className="notice notice--invite" role="status">
+              <span>已为“{file.name}”生成分享链接（令牌标识，匿名访问）：</span>
+              <code title={shareUrl}>{shareUrl}</code>
+            </div>
+          ) : null}
         </aside>
       </div>
       {toast ? <Toast message={toast} onDismiss={() => setToast(null)} /> : null}

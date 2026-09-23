@@ -219,7 +219,7 @@ export function ShareDialog({ file, onClose }: { file: FileRecord; onClose: () =
         {created ? (
           <div className="share-result" role="status">
             <div>
-              <strong>分享链接已生成</strong>
+              <strong>分享链接已生成（指向“{file.name}”）</strong>
               <code title={absoluteUrl(created.url)}>{absoluteUrl(created.url)}</code>
               <small>
                 {expiryLabel(created.share)}
