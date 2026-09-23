@@ -55,6 +55,11 @@ async function makeContext(maxUploadBytes = 1024 * 1024): Promise<TestContext> {
     cookieSecure: false,
     trustProxy: false,
     logLevel: 'silent',
+    rateLimitEnabled: false,
+    rateLimitMax: 5,
+    rateLimitWindowMs: 60_000,
+    registrationEnabled: true,
+    backupDir: join(directory, 'backups'),
   };
   const hub = await buildApp(config);
   return { app: hub.app, db: hub.db, directory, config };
@@ -212,7 +217,14 @@ describe('Local File Hub API', () => {
       username: '访客_01',
       role: 'user',
       isEnabled: true,
-      permissions: { read: false, upload: false, edit: false },
+      permissions: {
+        read: false,
+        download: false,
+        upload: false,
+        edit: false,
+        editMd: false,
+        share: false,
+      },
     });
     const userCookie = sessionCookie(registration);
 
@@ -252,7 +264,14 @@ describe('Local File Hub API', () => {
         permissions: { read: false, upload: true, edit: true },
       },
     });
-    expect(inconsistentGrant.json().user.permissions).toEqual({ read: false, upload: false, edit: false });
+    expect(inconsistentGrant.json().user.permissions).toEqual({
+      read: false,
+      download: false,
+      upload: true,
+      edit: true,
+      editMd: false,
+      share: false,
+    });
 
     await context.app.inject({
       method: 'PATCH',

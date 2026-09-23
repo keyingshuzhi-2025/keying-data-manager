@@ -20,6 +20,9 @@ import {
   requireRootPermission,
 } from '../authz.js';
 import { renderMarkdownPdf } from '../md-pdf.js';
+import { loadWatermarkConfig } from '../watermark-config.js';
+import { maybeWatermarkImage } from '../watermark-output.js';
+import { resolveWatermarkText } from '../watermark.js';
 import type { FileRecord, ListFilesQuery } from '../types.js';
 
 const idSchema = z.string().uuid();
@@ -146,10 +149,22 @@ function isMarkdownFile(file: FileRecord): boolean {
   return extension === 'md' || extension === 'markdown';
 }
 
-function watermarkTimestamp(now: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-    + ` ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+/** 以水印后图像字节响应（全量 200，不拆分 Range；防泄密优先） */
+function sendWatermarkedImage(
+  reply: FastifyReply,
+  result: { data: Buffer; mimeType: string },
+  file: FileRecord,
+  attachment: boolean,
+): FastifyReply {
+  const encodedName = encodeURIComponent(file.name).replace(/'/g, '%27');
+  return reply
+    .code(200)
+    .header('Content-Type', result.mimeType)
+    .header('Content-Disposition', `${attachment ? 'attachment' : 'inline'}; filename*=UTF-8''${encodedName}`)
+    .header('Content-Length', String(result.data.length))
+    .header('X-Content-Type-Options', 'nosniff')
+    .header('Cache-Control', 'private, no-store')
+    .send(result.data);
 }
 
 export function registerFileRoutes(app: FastifyInstance, context: RouteContext): void {
@@ -309,13 +324,18 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     if (result.truncated) throw badRequest('文件过大，无法导出 PDF');
 
     const user = (request as AuthenticatedRequest).user;
-    const watermark = user
-      ? `${user.username} ${watermarkTimestamp(new Date())}`
-      : `导出 ${watermarkTimestamp(new Date())}`;
+    // v0.1.2 §6.1：MD→PDF 身份水印使用管理员配置的模板与开关
+    const watermarkConfig = loadWatermarkConfig(context.db);
+    const watermark = watermarkConfig.enabled
+      ? resolveWatermarkText(watermarkConfig.text, {
+        kind: 'identity',
+        username: user?.username ?? '',
+        fileName: file.name,
+      })
+      : undefined;
     const pdf = await renderMarkdownPdf(result.content, {
       title: file.name,
       watermark,
-      cjkFontPath: context.config.pdfCjkFontPath,
     });
 
     logFileActivity(request, context.db, {
@@ -422,6 +442,16 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
   app.get('/api/files/:id/download', { preHandler: requireFileAll(['read', 'download']) }, async (request, reply) => {
     const file = context.files.get(fileIdFromParams(request));
     if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
+    const user = (request as AuthenticatedRequest).user;
+    // v0.1.2 §6.2：图像下载叠加身份水印（服务端强约束）
+    const watermarked = await maybeWatermarkImage(
+      file,
+      context.storage,
+      loadWatermarkConfig(context.db),
+      { kind: 'identity', username: user?.username ?? '', shareCode: undefined, now: new Date() },
+      'download',
+    );
+    if (watermarked) return sendWatermarkedImage(reply, watermarked, file, true);
     logFileActivity(request, context.db, {
       action: 'download',
       targetType: 'file',
@@ -433,6 +463,16 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
   app.get('/api/files/:id/stream', { preHandler: requireFileAll(['read', 'download']) }, async (request, reply) => {
     const file = context.files.get(fileIdFromParams(request));
     if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
+    const user = (request as AuthenticatedRequest).user;
+    // v0.1.2 §6.2：图像在线预览叠加身份水印
+    const watermarked = await maybeWatermarkImage(
+      file,
+      context.storage,
+      loadWatermarkConfig(context.db),
+      { kind: 'identity', username: user?.username ?? '', shareCode: undefined, now: new Date() },
+      'preview',
+    );
+    if (watermarked) return sendWatermarkedImage(reply, watermarked, file, false);
     return sendFile(file, request, reply, false, context.storage);
   });
 }

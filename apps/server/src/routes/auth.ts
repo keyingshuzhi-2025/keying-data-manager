@@ -21,6 +21,7 @@ import type { AppConfig } from '../config.js';
 import type { HubDatabase } from '../db/database.js';
 import { recordActivity } from '../activity-log.js';
 import { badRequest, conflict, forbidden, unauthorized } from '../errors.js';
+import { clientIp, enforceRateLimit, type RateLimiter } from '../rate-limit.js';
 
 const usernameSchema = z.string()
   .trim()
@@ -71,6 +72,7 @@ const changePasswordSchema = z.object({
 interface RouteContext {
   config: AppConfig;
   db: HubDatabase;
+  rateLimiter: RateLimiter;
 }
 
 function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
@@ -112,6 +114,11 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
 
   app.post('/api/auth/register', async (request, reply) => {
     const input = parseOrThrow(registerSchema, request.body, '注册参数无效');
+    // v0.1.2 M2：注册保护——按 IP 限流；未开放注册时仅允许带邀请码注册
+    enforceRateLimit(context.rateLimiter, `register:${clientIp(request)}`);
+    if (!context.config.registrationEnabled && !input.inviteCode) {
+      throw forbidden('当前未开放注册，请使用管理员分发的邀请链接');
+    }
     if (findLoginUser(context, input.username)) throw conflict('该用户名已被使用');
 
     // 校验邀请码（可选）：未停用、未使用、未过期
@@ -185,6 +192,11 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
 
   app.post('/api/auth/login', async (request, reply) => {
     const input = parseOrThrow(loginSchema, request.body, '登录参数无效');
+    // v0.1.2 M2：按 IP + 用户名固定窗口限流，防撞库/暴力破解
+    enforceRateLimit(
+      context.rateLimiter,
+      `login:${clientIp(request)}:${input.username.trim().toLowerCase()}`,
+    );
     const user = findLoginUser(context, input.username);
 
     if (!user || !verifyPassword(input.password, user.password_hash)) {
@@ -213,6 +225,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
 
   app.post('/api/auth/password', async (request, reply) => {
     const current = await requireUser(context.db.sqlite, request);
+    enforceRateLimit(context.rateLimiter, `password:${clientIp(request)}:${current.id}`);
     const input = parseOrThrow(changePasswordSchema, request.body, '修改密码参数无效');
     const row = context.db.sqlite.prepare(
       'SELECT password_hash FROM users WHERE id = ? LIMIT 1',

@@ -36,6 +36,8 @@ import type {
   UserActivityResponse,
   UserDetailsResponse,
   UsersResponse,
+  WatermarkConfig,
+  WatermarkConfigResponse,
 } from '../types';
 
 interface ErrorBody {
@@ -212,6 +214,13 @@ export const api = {
     request<ActivityListResponse>(`/api/admin/activity${encodeQuery(params)}`),
   exportActivityCsv: (params: ActivityListParams = {}) =>
     request<string>(`/api/admin/activity/export${encodeQuery(params)}`),
+
+  // ----- 动态水印配置（docs/v0.1.2-plan.md §6.1） -----
+  getWatermarkConfig: () => request<WatermarkConfigResponse>('/api/admin/watermark-config'),
+  updateWatermarkConfig: (config: WatermarkConfig) => request<WatermarkConfigResponse>(
+    '/api/admin/watermark-config',
+    { method: 'PUT', body: JSON.stringify(config) },
+  ),
 
   // ----- 文件内容 / 预览 / 导出（docs/v0.1.2-plan.md §6–§7） -----
   getFileContent: (id: string) => request<FileContentResponse>(`/api/files/${id}/content`),

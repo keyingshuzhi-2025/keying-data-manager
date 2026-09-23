@@ -15,6 +15,7 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerFileRoutes } from './routes/files.js';
 import { registerPublicShareRoutes } from './routes/public.js';
 import { registerShareRoutes } from './routes/shares.js';
+import { RateLimiter } from './rate-limit.js';
 import { LocalObjectStorage } from './storage.js';
 
 export interface HubApp {
@@ -35,6 +36,11 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
   const db = new HubDatabase(config.dbPath);
   const storage = new LocalObjectStorage(config.objectDir, config.uploadDir);
   const files = new FileService(db.sqlite, storage);
+  const rateLimiter = new RateLimiter({
+    enabled: config.rateLimitEnabled,
+    max: config.rateLimitMax,
+    windowMs: config.rateLimitWindowMs,
+  });
   const trustProxy = config.trustProxy;
   const loggerOptions = config.logLevel === 'silent'
     ? false
@@ -66,15 +72,17 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
       .header('Referrer-Policy', 'no-referrer')
       .header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     if (config.nodeEnv === 'production') {
-      reply.header(
-        'Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",
-      );
+      reply
+        .header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+        .header(
+          'Content-Security-Policy',
+          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",
+        );
     }
   });
 
-  registerAuthRoutes(app, { config, db });
-  registerAdminRoutes(app, { db });
+  registerAuthRoutes(app, { config, db, rateLimiter });
+  registerAdminRoutes(app, { db, rateLimiter });
   registerFileRoutes(app, { config, db, storage, files });
   registerShareRoutes(app, { config, db, files });
   registerPublicShareRoutes(app, { db, storage });
@@ -129,6 +137,14 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
   app.setErrorHandler((error, request, reply) => {
     request.log.debug(error);
     if (error instanceof AppError) {
+      if (
+        error.code === 'TOO_MANY_REQUESTS'
+        && error.details !== undefined
+        && typeof error.details === 'object'
+      ) {
+        const retryAfter = (error.details as { retryAfterSeconds?: number }).retryAfterSeconds;
+        if (retryAfter !== undefined) reply.header('Retry-After', String(retryAfter));
+      }
       reply.code(error.statusCode).send({
         error: {
           code: error.code,

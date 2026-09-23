@@ -22,6 +22,12 @@ import {
 } from '../authz.js';
 import type { HubDatabase } from '../db/database.js';
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
+import { clientIp, enforceRateLimit, type RateLimiter } from '../rate-limit.js';
+import {
+  loadWatermarkConfig,
+  saveWatermarkConfig,
+  watermarkConfigSchema,
+} from '../watermark-config.js';
 
 const userParamsSchema = z.object({ id: z.string().min(1).max(128) });
 const updatePermissionsSchema = z.object({
@@ -239,6 +245,7 @@ const activityCsv = (context: RouteContext, params: ActivityQuery) => {
 
 interface RouteContext {
   db: HubDatabase;
+  rateLimiter: RateLimiter;
 }
 
 function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string): T {
@@ -395,6 +402,29 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
     return activityCsv(context, input);
   });
 
+  // ----- 动态水印配置（v0.1.2 §6.1，app_config 落库，即时生效） -----
+
+  app.get('/api/admin/watermark-config', { preHandler: adminOnly }, async () => {
+    return { config: loadWatermarkConfig(context.db) };
+  });
+
+  app.put('/api/admin/watermark-config', { preHandler: adminOnly }, async (request) => {
+    const input = watermarkConfigSchema.safeParse(request.body);
+    if (!input.success) {
+      throw badRequest('水印配置无效', input.error.flatten());
+    }
+    const actor = await requireUser(context.db.sqlite, request);
+    const config = saveWatermarkConfig(context.db, input.data, actor.id);
+    recordActivity(context.db.sqlite, {
+      userId: actor.id,
+      action: 'watermark_config_change',
+      targetType: 'config',
+      targetName: '水印配置',
+      detail: `更新动态水印配置（enabled=${config.enabled}）`,
+    });
+    return { config };
+  });
+
   app.get('/api/admin/users', { preHandler: adminOnly }, async () => {
     const rows = context.db.sqlite.prepare(
       `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
@@ -513,6 +543,7 @@ export function registerAdminRoutes(app: FastifyInstance, context: RouteContext)
   // ----- 重置密码 -----
   app.post('/api/admin/users/:id/reset-password', { preHandler: adminOnly }, async (request) => {
     const { id } = parseOrThrow(userParamsSchema, request.params, '用户 ID 无效');
+    enforceRateLimit(context.rateLimiter, `reset-password:${clientIp(request)}`);
     const input = parseOrThrow(resetPasswordSchema, request.body, '重置密码参数无效');
     const current = getUser(context, id);
     if (current.role === 'admin') throw forbidden('管理员密码请直接在登录账号中修改');

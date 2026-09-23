@@ -32,9 +32,10 @@ export type ActivityAction =
   | 'share_revoke'
   | 'share_delete'
   | 'share_access'
-  | 'share_download';
+  | 'share_download'
+  | 'watermark_config_change';
 
-export type ActivityTargetType = 'file' | 'folder' | 'user' | 'invite' | 'share';
+export type ActivityTargetType = 'file' | 'folder' | 'user' | 'invite' | 'share' | 'config';
 
 export interface ActivityRecord {
   id: string;
@@ -223,4 +224,5 @@ export const ACTIVITY_LABELS: Record<ActivityAction, string> = {
   share_delete: '删除分享链接',
   share_access: '访问分享链接',
   share_download: '下载分享文件',
+  watermark_config_change: '修改水印配置',
 };

@@ -20,6 +20,8 @@ import { z } from 'zod';
 import type { HubDatabase } from '../db/database.js';
 import { badRequest, notFound, unauthorized } from '../errors.js';
 import type { LocalObjectStorage } from '../storage.js';
+import { loadWatermarkConfig } from '../watermark-config.js';
+import { maybeWatermarkImage } from '../watermark-output.js';
 import {
   checkSharePassword,
   isFileWithinShare,
@@ -193,6 +195,32 @@ function isSafeInlineType(mimeType: string): boolean {
     || type.startsWith('video/')
     || type === 'application/pdf'
     || type === 'text/plain';
+}
+
+/** 分享者用户名（溯源水印用）；用户已删除时返回占位符 */
+function sharerUsername(db: HubDatabase, share: ShareRow): string {
+  const row = db.sqlite.prepare(
+    'SELECT username FROM users WHERE id = ? LIMIT 1',
+  ).get(share.created_by) as { username: string } | undefined;
+  return row?.username ?? '已删除用户';
+}
+
+/** 以分享溯源水印后的图像字节响应（全量 200，禁止缓存） */
+function sendShareWatermarkedImage(
+  reply: FastifyReply,
+  result: { data: Buffer; mimeType: string },
+  file: ShareRootFile,
+  attachment: boolean,
+): FastifyReply {
+  const encodedName = encodeURIComponent(file.name).replace(/'/g, '%27');
+  return reply
+    .code(200)
+    .header('Content-Type', result.mimeType)
+    .header('Content-Disposition', `${attachment ? 'attachment' : 'inline'}; filename*=UTF-8''${encodedName}`)
+    .header('Content-Length', String(result.data.length))
+    .header('X-Content-Type-Options', 'nosniff')
+    .header('Cache-Control', 'private, no-store')
+    .send(result.data);
 }
 
 async function sendPublicFile(
@@ -374,6 +402,25 @@ export function registerPublicShareRoutes(
     const target = resolvePublicTarget(context.db, share, root, request);
     if (!target.objectId) throw notFound('文件内容');
 
+    // v0.1.2 §3.4：分享输出图像叠加分享者溯源水印（分享者 + 短码 + 时间）
+    const watermarked = await maybeWatermarkImage(
+      target,
+      context.storage,
+      loadWatermarkConfig(context.db),
+      { kind: 'share', username: sharerUsername(context.db, share), shareCode: token, now: new Date() },
+      'download',
+    );
+    if (watermarked) {
+      recordShareActivity(context.db, {
+        userId: share.created_by,
+        action: 'share_download',
+        targetType: 'file',
+        targetName: target.name,
+        detail: `公开下载（水印版） ${clientMeta(request)}`,
+      });
+      return sendShareWatermarkedImage(reply, watermarked, target, true);
+    }
+
     recordShareActivity(context.db, {
       userId: share.created_by,
       action: 'share_download',
@@ -395,6 +442,25 @@ export function registerPublicShareRoutes(
     );
     const target = resolvePublicTarget(context.db, share, root, request);
     if (!target.objectId) throw notFound('文件内容');
+
+    // v0.1.2 §3.4：分享预览图像叠加分享者溯源水印
+    const watermarked = await maybeWatermarkImage(
+      target,
+      context.storage,
+      loadWatermarkConfig(context.db),
+      { kind: 'share', username: sharerUsername(context.db, share), shareCode: token, now: new Date() },
+      'preview',
+    );
+    if (watermarked) {
+      recordShareActivity(context.db, {
+        userId: share.created_by,
+        action: 'share_access',
+        targetType: 'file',
+        targetName: target.name,
+        detail: `公开预览（水印版） ${clientMeta(request)}`,
+      });
+      return sendShareWatermarkedImage(reply, watermarked, target, false);
+    }
 
     recordShareActivity(context.db, {
       userId: share.created_by,

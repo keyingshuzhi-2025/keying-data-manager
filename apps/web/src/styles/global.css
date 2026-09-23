@@ -577,6 +577,27 @@ tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-ac
 .invite-status--used { color: #5a6470; background: #e8eaec; }
 .invite-status--revoked { color: #8c5a34; background: #f5e9dc; }
 
+/* Watermark settings panel (docs/v0.1.2-plan.md §6.1) */
+.wm-panel { display: grid; gap: 16px; }
+.wm-panel__form { display: grid; gap: 16px; }
+.wm-panel__row--switches { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; background: #f7f5ee; border: 1px solid var(--line); border-radius: 13px; }
+.wm-panel__row--switches .invite-permission-option { background: transparent; border-color: #d9dad3; }
+.wm-panel__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.wm-panel__field--wide { grid-column: 1 / -1; }
+.wm-panel__field--wide input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.field-hint { color: var(--muted); font-size: 0.64rem; line-height: 1.5; }
+.wm-panel__color { display: flex; align-items: center; gap: 8px; }
+.wm-panel__color input[type="color"] { width: 46px; height: 38px; flex: 0 0 auto; padding: 2px; border: 1px solid #d7d8d1; border-radius: 9px; background: white; cursor: pointer; }
+.wm-panel__showcase { position: relative; min-height: 132px; overflow: hidden; background: #e7e9e4; border: 1px solid var(--line); border-radius: 14px; }
+.wm-panel__showcase-photo { position: absolute; inset: 0; background: linear-gradient(135deg, #b9c6bd 0%, #7f9990 42%, #9db4a9 68%, #6e877d 100%); }
+.wm-panel__showcase-mark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; font-weight: 700; text-align: center; transform: rotate(-22deg); }
+.wm-panel__showcase-tag { position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; color: #4a5c54; background: rgb(255 255 255 / 78%); border-radius: 999px; font-size: 0.62rem; font-weight: 600; }
+.wm-panel__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.wm-panel__actions .user-details__note { flex: 1 1 260px; }
+.wm-panel__buttons { display: flex; gap: 8px; }
+.wm-panel__buttons .button { min-height: 40px; }
+.panel-loading { display: flex; align-items: center; gap: 8px; min-height: 120px; justify-content: center; color: var(--muted); font-size: 0.76rem; }
+
 /* Uploads and feedback */
 .drop-overlay { position: fixed; inset: 92px 32px 32px 282px; z-index: 80; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--green-900); background: rgb(235 242 237 / 92%); border: 2px dashed #6f9b88; border-radius: 24px; pointer-events: none; backdrop-filter: blur(7px); }
 .drop-overlay strong { font-size: 1.1rem; }

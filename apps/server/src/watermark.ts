@@ -293,13 +293,20 @@ async function rasterizeOverlay(
   density: number,
   maxInputPixels: number,
 ): Promise<{ data: Buffer; width: number; height: number }> {
-  const { data, info } = await sharp(Buffer.from(svgXml, 'utf8'), {
-    density,
-    limitInputPixels: maxInputPixels,
-  })
-    .png()
-    .toBuffer({ resolveWithObject: true });
-  return { data, width: info.width, height: info.height };
+  try {
+    const { data, info } = await sharp(Buffer.from(svgXml, 'utf8'), {
+      density,
+      limitInputPixels: maxInputPixels,
+    })
+      .png()
+      .toBuffer({ resolveWithObject: true });
+    return { data, width: info.width, height: info.height };
+  } catch (error) {
+    throw new WatermarkError(
+      'ENCODE',
+      `水印叠加层渲染失败: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -420,6 +427,21 @@ export async function watermarkImage(options: ImageWatermarkOptions): Promise<Wa
   const scale = clamp(Math.max(effWidth, effHeight) / 1600, 1, 4);
   const density = Math.round(72 * scale);
   const overlay = await rasterizeOverlay(buildOverlaySvg(label, style), density, maxInputPixels);
+
+  // 叠加层必须不超出目标图像（sharp composite 限制）。小图时按比例缩放叠加层，
+  // 保证图幅小于水印瓦片（如缩略图）也能正常合成，而非直接报错。
+  // 输出尺寸按下方 pipeline 的 fit:'inside' 精确推算（保留宽高比），叠加层拟合到该尺寸。
+  const outRatio = downscaled ? Math.min(targetWidth / effWidth, targetHeight / effHeight) : 1;
+  const outWidth = Math.max(1, Math.round(effWidth * outRatio));
+  const outHeight = Math.max(1, Math.round(effHeight * outRatio));
+  if (overlay.width > outWidth || overlay.height > outHeight) {
+    const fitted = await sharp(overlay.data)
+      .resize(outWidth, outHeight, { fit: 'inside', withoutEnlargement: true })
+      .toBuffer({ resolveWithObject: true });
+    overlay.data = fitted.data;
+    overlay.width = fitted.info.width;
+    overlay.height = fitted.info.height;
+  }
 
   let overlayOptions: Parameters<ReturnType<typeof sharp>['composite']>[0];
   if (style.position === 'tile') {

@@ -14,6 +14,7 @@
     "build:server": "tsc -p apps/server/tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "start": "node dist/apps/server/src/index.js",
+    "backup": "tsx scripts/backup.ts",
     "typecheck": "npm run typecheck:server && npm run typecheck:web",
     "typecheck:server": "tsc --noEmit -p apps/server/tsconfig.json",
     "typecheck:web": "tsc --noEmit -p apps/web/tsconfig.json",

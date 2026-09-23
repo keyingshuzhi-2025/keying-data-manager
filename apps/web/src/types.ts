@@ -305,6 +305,36 @@ export interface QuotaUpdateInput {
   storageQuotaBytes: number;
 }
 
+// ----- 动态水印配置（docs/v0.1.2-plan.md §6.1；GET/PUT /api/admin/watermark-config） -----
+export type WatermarkPosition = 'tile' | 'corner';
+export type WatermarkCorner = 'northwest' | 'northeast' | 'southwest' | 'southeast';
+
+export interface WatermarkConfig {
+  /** 全局开关：关闭后图像水印与 MD→PDF 身份水印均不叠加 */
+  enabled: boolean;
+  /** 文案模板，占位符：{username} {date} {time} {datetime} {shareCode} {fileName} */
+  text: string;
+  /** 透明度 0..1 */
+  opacity: number;
+  position: WatermarkPosition;
+  corner: WatermarkCorner;
+  /** 角落距边缘距离 */
+  margin: number;
+  fontSize: number;
+  /** #rgb / #rrggbb */
+  color: string;
+  angleDeg: number;
+  tileWidth: number;
+  tileHeight: number;
+  tileSpacing: number;
+  applyToPreview: boolean;
+  applyToDownload: boolean;
+}
+
+export interface WatermarkConfigResponse {
+  config: WatermarkConfig;
+}
+
 // ----- 文件内容 / 预览 / 导出（docs/v0.1.2-plan.md §6–§7） -----
 export interface FileContentResponse {
   fileId: string;

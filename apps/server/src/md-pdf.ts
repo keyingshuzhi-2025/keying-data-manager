@@ -4,8 +4,8 @@
  * 链路：markdown-it(GFM) → HTML → 结构化文本 → pdf-lib 分页绘制，
  * 每页叠加半透明身份水印（`{username}`/日期时间由调用方解析后传入 watermark）。
  *
- * 中文渲染：可选 `PDF_CJK_FONT` 指向的 TTF（经 @pdf-lib/fontkit 动态嵌入；
- * fontkit 未安装时自动回退标准 Helvetica，仅 ASCII 字形可见）。
+ * 中文渲染：当前轻量实现使用 pdf-lib 标准字体，中文内容可能缺字；后续可替换为
+ * Chromium + Noto Sans CJK 或 pdf-lib + 自定义 TTF 的渲染器实现。
  * 渲染器接口化：后续 puppeteer（Chromium + Noto Sans CJK）实现可无缝替换本实现。
  */
 
@@ -23,8 +23,6 @@ export interface PdfRenderOptions {
   title?: string;
   /** 每页叠加的身份水印文案 */
   watermark?: string;
-  /** 可选 CJK TTF 字体路径（配置项 PDF_CJK_FONT） */
-  cjkFontPath?: string;
 }
 
 export interface PdfRenderer {

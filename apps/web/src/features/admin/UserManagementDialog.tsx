@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Droplets,
   Eye,
   Activity,
   Gauge,
@@ -29,6 +30,7 @@ import { errorMessage, formatBytes, formatDate } from '../../utils/format';
 import { InvitesPanel } from './InvitesPanel';
 import { ActivityAuditPanel } from './ActivityAuditPanel';
 import { QuotaManagementPanel } from './QuotaManagementPanel';
+import { WatermarkConfigPanel } from './WatermarkConfigPanel';
 
 interface UserManagementDialogProps {
   currentUser: AuthUser;
@@ -529,7 +531,7 @@ function UserDetailsDialog({ user, currentUser, onClose }: {
 // ----- 主对话框 -----
 export function UserManagementDialog({ currentUser, onClose }: UserManagementDialogProps) {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'users' | 'invites' | 'audit' | 'quota'>('users');
+  const [tab, setTab] = useState<'users' | 'invites' | 'audit' | 'quota' | 'watermark'>('users');
   const users = useQuery({
     queryKey: ['admin-users'],
     queryFn: api.listUsers,
@@ -663,6 +665,15 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
             >
               <Gauge size={16} /> 存储配额
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'watermark'}
+              className={tab === 'watermark' ? 'is-active' : ''}
+              onClick={() => setTab('watermark')}
+            >
+              <Droplets size={16} /> 水印设置
+            </button>
           </div>
 
           {tab === 'invites' ? (
@@ -671,6 +682,8 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
             <ActivityAuditPanel />
           ) : tab === 'quota' ? (
             <QuotaManagementPanel />
+          ) : tab === 'watermark' ? (
+            <WatermarkConfigPanel />
           ) : (
             <>
               <div className="permission-note">
