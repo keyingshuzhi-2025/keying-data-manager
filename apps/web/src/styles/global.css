@@ -477,7 +477,7 @@ tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-ac
 }
 .permission-card:hover:not(:disabled) { border-color: #9fc4a6; background: #f6faf7; }
 .permission-card.is-on { border-color: var(--green-700); background: #eef8f0; box-shadow: inset 0 0 0 1px var(--green-200); }
-.permission-card.is-disabled { opacity: .65; cursor: not-allowed; background: #f4f4f2; }
+.permission-card.is-disabled { opacity: .6; cursor: not-allowed; background: #f4f4f2; }
 .permission-card__icon { color: var(--green-800); display: grid; place-items: center; }
 .permission-card.is-on .permission-card__icon { color: var(--green-800); }
 .permission-card__text { display: grid; gap: 2px; min-width: 0; }
@@ -489,7 +489,13 @@ tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-ac
   color: white; background: #cbd5c9; flex: 0 0 auto;
 }
 .permission-card.is-on .permission-card__state { background: var(--green-700); }
-.permission-card__state.is-off { background: #cbd5c9; }
+.permission-card.is-on .permission-card__state.is-off { background: var(--green-700); }
+.permission-card.is-disabled .permission-card__state { background: #cbd5c9; color: #6b7280; }
+
+.user-access-row .permission-grid { margin-top: 4px; }
+.user-access-row .permission-grid .permission-card { padding: 10px 12px; }
+.user-access-row .permission-grid .permission-card__text strong { font-size: 0.74rem; }
+.user-access-row .permission-grid .permission-card__text small { font-size: 0.62rem; }
 
 .user-management__state { min-height: 150px; }
 .user-access-list { display: grid; gap: 12px; }

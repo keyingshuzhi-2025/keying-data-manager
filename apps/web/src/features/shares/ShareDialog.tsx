@@ -16,6 +16,7 @@ import { Modal } from '../../components/Modal';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import type { FileRecord, ShareExpiryTier, ShareLink } from '../../types';
 import { errorMessage, formatDate } from '../../utils/format';
+import { copyToClipboard } from '../../utils/clipboard';
 import { shareLinkStatus, type ShareLinkStatus } from './utils';
 import './shares.css';
 
@@ -48,12 +49,10 @@ function absoluteUrl(url: string): string {
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
+    const ok = await copyToClipboard(text);
+    if (ok) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // 剪贴板不可用时用户可手动复制
     }
   };
   return (

@@ -7,6 +7,7 @@ import { Modal } from '../../components/Modal';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import type { FileRecord, PermissionSet } from '../../types';
 import { errorMessage, fileTypeOf, formatBytes, formatDate } from '../../utils/format';
+import { copyToClipboard } from '../../utils/clipboard';
 import { FolderPermissionsDialog } from './FolderPermissionsDialog';
 import { PermissionGrid } from '../common/PermissionCard';
 
@@ -54,11 +55,15 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
   });
   const share = useMutation({
     mutationFn: () => api.createShareLink({ fileId: file.id, expiresIn: '7d', maxAccesses: null, password: null }),
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       const url = /^https?:\/\//i.test(result.url) ? result.url : new URL(result.url, window.location.origin).toString();
       setShareUrl(url);
-      void navigator.clipboard?.writeText(url).catch(() => undefined);
-      setToast({ id: Date.now(), text: '分享链接已创建并复制到剪贴板', tone: 'success' });
+      const ok = await copyToClipboard(url);
+      setToast({
+        id: Date.now(),
+        text: ok ? '分享链接已创建并复制到剪贴板' : '分享链接已创建（复制失败，请手动复制）',
+        tone: 'success',
+      });
     },
     onError: (error) => setToast({ id: Date.now(), text: errorMessage(error), tone: 'error' }),
   });
