@@ -22,12 +22,12 @@ const permissionLabels: Array<{
   title: string;
 }> = [
   { key: 'read', title: '读取' },
-  { key: 'download', title: '下载' },
   { key: 'upload', title: '上传' },
   { key: 'edit', title: '编辑' },
-  { key: 'editMd', title: 'Markdown 编辑' },
-  { key: 'share', title: '对外分享' },
 ];
+
+/** 下载、Markdown 编辑与对外分享由文件夹级 ACL 控制，不在此处预设。 */
+const aclNote = '下载、Markdown 编辑与分享权限由文件夹级 ACL 控制。';
 
 const expiryOptions: Array<{ value: number | null; label: string }> = [
   { value: 1, label: '1 小时后过期' },
@@ -82,7 +82,7 @@ export function InvitesPanel({ currentUser }: InvitesPanelProps) {
   const invites = useQuery({ queryKey: ['admin-invites'], queryFn: api.listInvites });
 
   const [permissions, setPermissions] = useState<AuthUser['permissions']>({
-    read: true, download: true, upload: true, edit: true, editMd: false, share: false,
+    read: true, upload: true, edit: true,
   });
   const [expiresInHours, setExpiresInHours] = useState<number | null>(24);
 
@@ -123,7 +123,7 @@ export function InvitesPanel({ currentUser }: InvitesPanelProps) {
                     checked={permissions[key]}
                     onChange={(event) => setPermissions((current) => {
                       if (key === 'read' && !event.target.checked) {
-                        return { read: false, download: false, upload: false, edit: false, editMd: false, share: false };
+                        return { read: false, upload: false, edit: false };
                       }
                       return {
                         ...current,
@@ -137,6 +137,7 @@ export function InvitesPanel({ currentUser }: InvitesPanelProps) {
               ))}
             </div>
           </fieldset>
+          <p className="user-details__note">{aclNote}</p>
           <label className="field invite-expiry">
             <span>有效期</span>
             <select

@@ -55,12 +55,12 @@ const permissionLabels: Array<{
   description: string;
 }> = [
   { key: 'read', title: '读取', description: '浏览和预览文件' },
-  { key: 'download', title: '下载', description: '将文件保存到自己的设备' },
   { key: 'upload', title: '上传与创建', description: '上传文件、新建文件夹' },
   { key: 'edit', title: '编辑与删除', description: '重命名、移动、复制和删除' },
-  { key: 'editMd', title: 'Markdown 编辑', description: '在线修改 Markdown 内容' },
-  { key: 'share', title: '对外分享', description: '创建限时公开分享链接' },
 ];
+
+/** 下载 / Markdown 编辑 / 分享由文件夹级 ACL 控制，不在此处全局设置。 */
+const aclNote = '下载、Markdown 编辑与对外分享权限由文件夹级 ACL 控制（管理员可绕过）。';
 
 const UserPermissionRow = memo(function UserPermissionRow({
   user,
@@ -132,7 +132,7 @@ const UserPermissionRow = memo(function UserPermissionRow({
               checked={permissions[key]}
               onChange={(event) => setPermissions((current) => {
                 if (key === 'read' && !event.target.checked) {
-                  return { read: false, download: false, upload: false, edit: false, editMd: false, share: false };
+                  return { read: false, upload: false, edit: false };
                 }
                 return {
                   ...current,
@@ -216,7 +216,7 @@ function CreateUserDialog({ onClose, onCreated }: {
   const [password, setPassword] = useState('');
   const [isEnabled, setIsEnabled] = useState(true);
   const [permissions, setPermissions] = useState<AuthUser['permissions']>({
-    read: true, download: true, upload: true, edit: true, editMd: false, share: false,
+    read: true, upload: true, edit: true,
   });
 
   const create = useMutation({
@@ -235,7 +235,7 @@ function CreateUserDialog({ onClose, onCreated }: {
   };
 
   return (
-    <Modal title="新建用户" description="为局域网成员开通账号并预设权限。" onClose={onClose} size="medium">
+    <Modal title="新建用户" description="为局域网成员开通账号并预设权限。下载、Markdown 编辑与分享由文件夹级 ACL 控制。" onClose={onClose} size="medium">
       <form className="user-create-form" onSubmit={submit}>
         {create.isError ? (
           <div className="notice notice--error" role="alert">{errorMessage(create.error)}</div>
@@ -284,7 +284,7 @@ function CreateUserDialog({ onClose, onCreated }: {
                 checked={permissions[key]}
                 onChange={(event) => setPermissions((current) => {
                   if (key === 'read' && !event.target.checked) {
-                    return { read: false, download: false, upload: false, edit: false, editMd: false, share: false };
+                    return { read: false, upload: false, edit: false };
                   }
                   return {
                     ...current,
@@ -623,7 +623,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
     <>
       <Modal
         title="用户与权限"
-        description="管理账号、权限、角色与邀请链接。"
+        description="管理账号、角色、存储配额与水印配置。全局权限仅读取/上传/编辑；下载、Markdown 编辑与分享由文件夹级 ACL 控制。"
         onClose={onClose}
         size="large"
       >
