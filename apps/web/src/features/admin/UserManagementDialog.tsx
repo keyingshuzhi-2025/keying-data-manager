@@ -1,9 +1,9 @@
 import { memo, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Activity,
   Droplets,
   Eye,
-  Activity,
   Gauge,
   Gift,
   KeyRound,
@@ -31,6 +31,8 @@ import { InvitesPanel } from './InvitesPanel';
 import { ActivityAuditPanel } from './ActivityAuditPanel';
 import { QuotaManagementPanel } from './QuotaManagementPanel';
 import { WatermarkConfigPanel } from './WatermarkConfigPanel';
+import { PermissionGrid, PERMISSION_DEFINITIONS, permissionSummaryText, type PermissionDefinition } from '../common/PermissionCard';
+import type { PermissionSet } from '../../types';
 
 interface UserManagementDialogProps {
   currentUser: AuthUser;
@@ -53,11 +55,13 @@ const permissionLabels: Array<{
   key: keyof AuthUser['permissions'];
   title: string;
   description: string;
-}> = [
-  { key: 'read', title: '读取', description: '浏览和预览文件' },
-  { key: 'upload', title: '上传与创建', description: '上传文件、新建文件夹' },
-  { key: 'edit', title: '编辑与删除', description: '重命名、移动、复制和删除' },
-];
+}> = PERMISSION_DEFINITIONS.filter((d: PermissionDefinition) =>
+  ['read', 'upload', 'edit'].includes(d.key),
+) as Array<{
+  key: keyof AuthUser['permissions'];
+  title: string;
+  description: string;
+}>;
 
 /** 下载 / Markdown 编辑 / 分享由文件夹级 ACL 控制，不在此处全局设置。 */
 const aclNote = '下载、Markdown 编辑与对外分享权限由文件夹级 ACL 控制（管理员可绕过）。';
@@ -125,26 +129,11 @@ const UserPermissionRow = memo(function UserPermissionRow({
       </header>
 
       <div className="permission-options">
-        {permissionLabels.map(({ key, title, description }) => (
-          <label className="permission-option" key={key}>
-            <input
-              type="checkbox"
-              checked={permissions[key]}
-              onChange={(event) => setPermissions((current) => {
-                if (key === 'read' && !event.target.checked) {
-                  return { read: false, upload: false, edit: false };
-                }
-                return {
-                  ...current,
-                  read: key === 'read' ? event.target.checked : (event.target.checked || current.read),
-                  [key]: event.target.checked,
-                };
-              })}
-              disabled={isAdmin || !isEnabled || saving}
-            />
-            <span><strong>{title}</strong><small>{description}</small></span>
-          </label>
-        ))}
+        <PermissionGrid
+          permissions={permissions as PermissionSet}
+          onChange={(next: AuthUser['permissions']) => setPermissions(next)}
+          disabled={isAdmin || !isEnabled || saving}
+        />
       </div>
 
       <footer className="user-access-row__footer">
@@ -277,25 +266,10 @@ function CreateUserDialog({ onClose, onCreated }: {
         </label>
         <fieldset className="create-permissions">
           <legend>初始权限</legend>
-          {permissionLabels.map(({ key, title, description }) => (
-            <label className="permission-option" key={key}>
-              <input
-                type="checkbox"
-                checked={permissions[key]}
-                onChange={(event) => setPermissions((current) => {
-                  if (key === 'read' && !event.target.checked) {
-                    return { read: false, upload: false, edit: false };
-                  }
-                  return {
-                    ...current,
-                    read: key === 'read' ? event.target.checked : (event.target.checked || current.read),
-                    [key]: event.target.checked,
-                  };
-                })}
-              />
-              <span><strong>{title}</strong><small>{description}</small></span>
-            </label>
-          ))}
+          <PermissionGrid
+            permissions={permissions as PermissionSet}
+            onChange={(next: AuthUser['permissions']) => setPermissions(next)}
+          />
         </fieldset>
         <div className="user-create-form__footer">
           <button className="button button--secondary" type="button" onClick={onClose}>取消</button>

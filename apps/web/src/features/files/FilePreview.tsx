@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, FileQuestion, LoaderCircle, Save, Share2 } from 'lucide-react';
+import { Download, FileQuestion, FolderLock, LoaderCircle, Save, Share2 } from 'lucide-react';
 import { api, fileExportPdfUrl, fileStreamUrl } from '../../api/client';
 import { FileTypeIcon } from '../../components/FileTypeIcon';
 import { Modal } from '../../components/Modal';
 import { Toast, type ToastMessage } from '../../components/Toast';
-import type { FileRecord } from '../../types';
+import type { FileRecord, PermissionSet } from '../../types';
 import { errorMessage, fileTypeOf, formatBytes, formatDate } from '../../utils/format';
+import { FolderPermissionsDialog } from './FolderPermissionsDialog';
+import { PermissionGrid } from '../common/PermissionCard';
 
 interface FilePreviewProps {
   file: FileRecord;
@@ -26,6 +28,15 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
   const [editorOpen, setEditorOpen] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [folderPermissionsOpen, setFolderPermissionsOpen] = useState(false);
+  const [filePermissions, setFilePermissions] = useState<PermissionSet>({
+    read: true,
+    download: canDownload,
+    upload: false,
+    edit: false,
+    editMd: canEditMd,
+    share: canShare,
+  });
   const contentQuery = useQuery({
     queryKey: ['file-content', file.id],
     queryFn: () => api.previewFile(file.id),
@@ -138,7 +149,21 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
               <code title={shareUrl}>{shareUrl}</code>
             </div>
           ) : null}
+          <div className="notice notice--invite">
+            <FolderLock size={17} />
+            <div>
+              <strong>目录权限卡片</strong>
+              <span>以下为当前目录生效的权限；点击下方按钮修改目录级权限。</span>
+            </div>
+          </div>
+          <PermissionGrid permissions={filePermissions} onChange={() => setFolderPermissionsOpen(true)} disabled />
         </aside>
+        {folderPermissionsOpen ? (
+          <FolderPermissionsDialog
+            folderId={file.parentId ?? 'ROOT'}
+            onClose={() => setFolderPermissionsOpen(false)}
+          />
+        ) : null}
       </div>
       {toast ? <Toast message={toast} onDismiss={() => setToast(null)} /> : null}
     </Modal>

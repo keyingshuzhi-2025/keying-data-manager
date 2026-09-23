@@ -461,6 +461,36 @@ tr:hover .file-actions, tr:focus-within .file-actions, .file-card:hover .file-ac
 .permission-note > div { display: grid; gap: 3px; }
 .permission-note strong { font-size: 0.79rem; }
 .permission-note span { color: #5d7569; font-size: 0.71rem; line-height: 1.5; }
+.permission-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.permission-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.permission-card:hover:not(:disabled) { border-color: #9fc4a6; background: #f6faf7; }
+.permission-card.is-on { border-color: var(--green-700); background: #eef8f0; box-shadow: inset 0 0 0 1px var(--green-200); }
+.permission-card.is-disabled { opacity: .65; cursor: not-allowed; background: #f4f4f2; }
+.permission-card__icon { color: var(--green-800); display: grid; place-items: center; }
+.permission-card.is-on .permission-card__icon { color: var(--green-800); }
+.permission-card__text { display: grid; gap: 2px; min-width: 0; }
+.permission-card__text strong { font-size: 0.78rem; color: var(--ink); }
+.permission-card__text small { color: var(--muted); font-size: 0.66rem; line-height: 1.4; }
+.permission-card__state {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 0.65rem; font-weight: 700;
+  color: white; background: #cbd5c9; flex: 0 0 auto;
+}
+.permission-card.is-on .permission-card__state { background: var(--green-700); }
+.permission-card__state.is-off { background: #cbd5c9; }
+
 .user-management__state { min-height: 150px; }
 .user-access-list { display: grid; gap: 12px; }
 .user-access-row { padding: 17px; background: white; border: 1px solid var(--line); border-radius: 15px; }

@@ -6,6 +6,7 @@ import { Modal } from '../../components/Modal';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import type { FolderAclInfo, PermissionSet } from '../../types';
 import { errorMessage } from '../../utils/format';
+import { PermissionGrid, permissionSummaryText } from '../common/PermissionCard';
 
 const permissionLabels: Array<{
   key: keyof PermissionSet;
@@ -104,24 +105,16 @@ export function FolderPermissionsDialog({
             </div>
           </div>
           <fieldset className="create-permissions">
-            <legend>六维权限</legend>
-            <div className="permission-options">
-              {permissionLabels.map(({ key, title, description }) => (
-                <label className="permission-option" key={key}>
-                  <input
-                    type="checkbox"
-                    checked={permissions[key]}
-                    onChange={(event) => setPermissions((current) => current ? { ...current, [key]: event.target.checked } : current)}
-                    disabled={busy}
-                  />
-                  <span><strong>{title}</strong><small>{description}</small></span>
-                </label>
-              ))}
-            </div>
+            <legend>六维权限卡片</legend>
+            <PermissionGrid
+              permissions={permissions}
+              onChange={(next) => setPermissions(next)}
+              disabled={busy}
+            />
           </fieldset>
-          {effective ? (
-            <div className="user-details__note"><FolderLock size={14} />生效权限：{permissionLabels.filter(({ key }) => effective[key]).map(({ title }) => title).join(' / ') || '无'}</div>
-          ) : null}
+          <div className="user-details__note">
+            <FolderLock size={14} />生效权限：{permissionSummaryText(effective ?? permissions)}
+          </div>
           <div className="user-create-form__footer">
             <button
               className="button button--secondary"
