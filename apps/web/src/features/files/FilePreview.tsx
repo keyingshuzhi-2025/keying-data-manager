@@ -1,6 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, FileQuestion, FolderLock, LoaderCircle, Save, Share2 } from 'lucide-react';
+import {
+  Download,
+  ExternalLink,
+  FileQuestion,
+  FolderLock,
+  Link2,
+  LoaderCircle,
+  Save,
+  Share2,
+} from 'lucide-react';
 import { api, fileExportPdfUrl, fileStreamUrl } from '../../api/client';
 import { FileTypeIcon } from '../../components/FileTypeIcon';
 import { Modal } from '../../components/Modal';
@@ -136,6 +145,22 @@ export function FilePreview({ file, onClose, canDownload, canEditMd, canShare }:
             <div><dt>修改时间</dt><dd>{formatDate(file.updatedAt)}</dd></div>
             <div><dt>校验值</dt><dd className="hash" title={file.sha256 ?? undefined}>{file.sha256?.slice(0, 16) ?? '—'}</dd></div>
           </dl>
+          <div className="preview-meta__actions">
+            <a className="button button--secondary" href={fileStreamUrl(file.id)} target="_blank" rel="noopener noreferrer" title="在新标签页中打开">
+              <ExternalLink size={15} /> 新标签页打开
+            </a>
+            <button
+              className="button button--secondary"
+              type="button"
+              onClick={async () => {
+                const ok = await copyToClipboard(fileStreamUrl(file.id));
+                setToast({ id: Date.now(), text: ok ? '文件链接已复制' : '复制失败，请手动复制', tone: ok ? 'success' : 'error' });
+              }}
+              title="复制文件流链接"
+            >
+              <Link2 size={15} /> 复制链接
+            </button>
+          </div>
           {canEditMd && isMarkdown ? (
             <button className="button button--secondary button--wide" type="button" onClick={() => setEditorOpen(true)}>编辑 Markdown</button>
           ) : null}
