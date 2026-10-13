@@ -18,13 +18,16 @@ import {
 import {
   ApiError,
   api,
+  forgetPublicSharePassword,
   publicShareDownloadUrl,
+  publicShareExportPdfUrl,
   publicShareStreamUrl,
+  rememberPublicSharePassword,
 } from '../../api/client';
 import { FileTypeIcon } from '../../components/FileTypeIcon';
 import { errorMessage, fileTypeOf, formatBytes, formatDate } from '../../utils/format';
 import { PublicFilePreview } from './PublicFilePreview';
-import { publicTargetUrl, toFileRecord } from './utils';
+import { isMarkdownMeta, publicTargetUrl, toFileRecord } from './utils';
 import type { PublicShareInfo, ShareTreeNode } from '../../types';
 import './shares.css';
 
@@ -131,6 +134,7 @@ export function PublicSharePage({ token }: { token: string }) {
     setUnlocked(false);
     setPasswordInput('');
     setPreview(null);
+    forgetPublicSharePassword(token);
   }, [token]);
 
   const info = useQuery({
@@ -156,7 +160,12 @@ export function PublicSharePage({ token }: { token: string }) {
 
   const verify = useMutation({
     mutationFn: (value: string) => api.verifyPublicSharePassword(token, { password: value }),
-    onSuccess: () => setUnlocked(true),
+    onSuccess: (_result, value) => {
+      // 验证通过后缓存密码：解锁后的 info/tree/stream/download 请求都需携带密码，
+      // 否则服务端 resolveShareForAccess 会再次抛 SHARE_PASSWORD_REQUIRED。
+      rememberPublicSharePassword(token, value);
+      setUnlocked(true);
+    },
   });
 
   const submitPassword = (event: FormEvent) => {
@@ -172,8 +181,11 @@ export function PublicSharePage({ token }: { token: string }) {
 
   const streamUrl = publicShareStreamUrl(token);
   const downloadUrl = publicShareDownloadUrl(token);
+  const exportPdfUrl = publicShareExportPdfUrl(token);
   const rootType = rootFile ? fileTypeOf(rootFile) : 'other';
   const rootName = rootFile?.name ?? share?.fileName ?? '分享文件';
+  // Markdown 分享：直接渲染为带水印的 PDF（无需手动导出）；纯文本走 sandbox 文本预览
+  const rootIsMarkdown = rootFile ? isMarkdownMeta(rootFile) : false;
 
   return (
     <div className="public-share">
@@ -294,7 +306,10 @@ export function PublicSharePage({ token }: { token: string }) {
                     {rootType === 'document' && rootFile?.mimeType === 'application/pdf' ? (
                       <iframe src={streamUrl} title={`${rootName} PDF 预览`} />
                     ) : null}
-                    {rootType === 'document' && rootFile?.mimeType?.startsWith('text/') ? (
+                    {rootType === 'text' && rootIsMarkdown ? (
+                      <iframe src={exportPdfUrl} title={`${rootName} PDF 预览`} />
+                    ) : null}
+                    {rootType === 'text' && !rootIsMarkdown ? (
                       <iframe className="text-preview" sandbox="" src={streamUrl} title={`${rootName} 文本预览`} />
                     ) : null}
                     {(rootType === 'other'

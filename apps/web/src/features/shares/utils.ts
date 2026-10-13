@@ -46,3 +46,9 @@ export function toFileRecord(node: ShareTreeNode): FileRecord {
 export function publicTargetUrl(base: string, node: ShareTreeNode): string {
   return `${base}?path=${encodeURIComponent(node.path)}`;
 }
+
+/** 判断分享节点 / 文件记录是否为 Markdown（公开分享端将渲染为带水印 PDF）。 */
+export function isMarkdownMeta(file: { name?: string; extension?: string | null; mimeType?: string | null }): boolean {
+  return /\.(md|markdown)$/i.test(file.name ?? file.extension ?? '')
+    || file.mimeType === 'text/markdown';
+}

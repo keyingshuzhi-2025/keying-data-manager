@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import type { HubDatabase } from '../src/db/database.js';
 import type { AppConfig } from '../src/config.js';
+import { ROOT_FOLDER_ID } from '../src/authz.js';
 
 interface TestContext {
   app: FastifyInstance;
@@ -233,7 +234,8 @@ describe('Local File Hub API', () => {
       url: '/api/files',
       headers: { cookie: userCookie },
     });
-    expect(initialRead.statusCode).toBe(403);
+    // v0.1.2：ROOT 默认策略对已登录用户全开，新注册用户可直接浏览根目录（管理员可按需收紧子目录）。
+    expect(initialRead.statusCode).toBe(200);
 
     const adminCookie = await login(context.app);
     const usersResponse = await context.app.inject({
@@ -289,6 +291,15 @@ describe('Local File Hub API', () => {
     });
     expect(allowedRead.statusCode).toBe(200);
 
+    // v0.1.2：管理员通过文件夹级 ACL 收紧根目录默认策略（上传/编辑关闭），用户立即受限制。
+    const tighten = await context.app.inject({
+      method: 'PUT',
+      url: '/api/admin/permissions',
+      headers: { cookie: adminCookie },
+      payload: { folderId: ROOT_FOLDER_ID, permissions: { upload: false, edit: false, editMd: false, share: false } },
+    });
+    expect(tighten.statusCode).toBe(200);
+
     const deniedCreate = await context.app.inject({
       method: 'POST',
       url: '/api/files',
@@ -297,14 +308,14 @@ describe('Local File Hub API', () => {
     });
     expect(deniedCreate.statusCode).toBe(403);
 
-    await context.app.inject({
-      method: 'PATCH',
-      url: `/api/admin/users/${user!.id}`,
+    // 管理员重新授予上传，立即生效。
+    const grantUpload = await context.app.inject({
+      method: 'PUT',
+      url: '/api/admin/permissions',
       headers: { cookie: adminCookie },
-      payload: {
-        permissions: { read: true, upload: true, edit: false },
-      },
+      payload: { folderId: ROOT_FOLDER_ID, permissions: { upload: true } },
     });
+    expect(grantUpload.statusCode).toBe(200);
     const created = await context.app.inject({
       method: 'POST',
       url: '/api/files',
@@ -321,6 +332,14 @@ describe('Local File Hub API', () => {
       payload: { name: '更名被拒绝' },
     })).statusCode).toBe(403);
 
+    // 管理员再授予编辑，文件重命名立即生效（legacy 列仍保留为过渡）。
+    const grantEdit = await context.app.inject({
+      method: 'PUT',
+      url: '/api/admin/permissions',
+      headers: { cookie: adminCookie },
+      payload: { folderId: ROOT_FOLDER_ID, permissions: { edit: true } },
+    });
+    expect(grantEdit.statusCode).toBe(200);
     await context.app.inject({
       method: 'PATCH',
       url: `/api/admin/users/${user!.id}`,

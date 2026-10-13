@@ -194,7 +194,7 @@ describe('公开分享链接（匿名 · 限时 · 只读 · 可撤销）', () =
     expect(second.json().error.code).toBe('SHARE_ACCESS_EXCEEDED');
   });
 
-  it('访问密码：缺失/错误 401，正确可通过查询参数或请求头', async () => {
+  it('访问密码：拒绝 URL 参数，验证后通过 HttpOnly Cookie 或请求头访问', async () => {
     const { token } = await createShare(context.app, cookie, { fileId, expiresIn: '7d', password: 's3cret' });
 
     const missing = await context.app.inject({ method: 'GET', url: `/api/public/shares/${token}/info` });
@@ -205,12 +205,27 @@ describe('公开分享链接（匿名 · 限时 · 只读 · 可撤销）', () =
       method: 'GET', url: `/api/public/shares/${token}/info?password=nope`,
     });
     expect(wrong.statusCode).toBe(401);
-    expect(wrong.json().error.code).toBe('SHARE_PASSWORD_INCORRECT');
+    expect(wrong.json().error.code).toBe('SHARE_PASSWORD_REQUIRED');
 
     const byQuery = await context.app.inject({
       method: 'GET', url: `/api/public/shares/${token}/info?password=s3cret`,
     });
-    expect(byQuery.statusCode).toBe(200);
+    expect(byQuery.statusCode).toBe(401);
+
+    const verified = await context.app.inject({
+      method: 'POST', url: `/api/public/shares/${token}/verify`, payload: { password: 's3cret' },
+    });
+    expect(verified.statusCode).toBe(200);
+    const setCookie = verified.headers['set-cookie'];
+    expect(setCookie).toBeDefined();
+    const cookieHeader = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+    expect(cookieHeader).toMatch(/HttpOnly/i);
+
+    const byCookie = await context.app.inject({
+      method: 'GET', url: `/api/public/shares/${token}/info`,
+      headers: { cookie: cookieHeader!.split(';')[0] },
+    });
+    expect(byCookie.statusCode).toBe(200);
 
     const byHeader = await context.app.inject({
       method: 'GET', url: `/api/public/shares/${token}/info`,

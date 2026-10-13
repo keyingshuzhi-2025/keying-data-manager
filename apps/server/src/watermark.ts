@@ -246,7 +246,7 @@ function escapeXml(text: string): string {
     .replace(/'/g, '&apos;');
 }
 
-/** Rough per-character advance estimate (CJK ≈ 1.0em, Latin ≈ 0.55em). */
+/** 粗略逐字符估宽（CJK ≈ 1.0em，拉丁 ≈ 0.55em），用于字号自适应收缩。 */
 function estimateTextWidth(text: string, fontSize: number): number {
   let units = 0;
   for (const ch of text) {
@@ -256,10 +256,10 @@ function estimateTextWidth(text: string, fontSize: number): number {
 }
 
 /**
- * Build the watermark overlay as an SVG tile (rasterized at the chosen density by sharp).
- * Font size shrinks automatically when the label is wider than the tile.
+ * 构建水印瓦片 SVG（单个瓦片：旋转后的文案 + 间距，整体为轴对齐矩形）。
+ * 图像水印与 PDF 水印共用此瓦片，保证视觉一致。导出供 PDF 水印复用。
  */
-function buildOverlaySvg(label: string, style: WatermarkStyle): string {
+export function buildOverlaySvg(label: string, style: WatermarkStyle): string {
   const { r, g, b } = parseHexColor(style.color);
   const tileWidth = style.tile.width;
   const tileHeight = style.tile.height;
@@ -287,8 +287,8 @@ function buildOverlaySvg(label: string, style: WatermarkStyle): string {
   );
 }
 
-/** Rasterize the overlay SVG to a PNG buffer with the requested density. */
-async function rasterizeOverlay(
+/** 将水印瓦片 SVG 光栅化为 PNG（供 PDF 平铺复用）。 */
+export async function rasterizeOverlay(
   svgXml: string,
   density: number,
   maxInputPixels: number,

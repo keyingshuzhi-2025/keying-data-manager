@@ -47,7 +47,7 @@ interface UserPermissionRowProps {
   selected: boolean;
   onToggleSelect: (id: string) => void;
   saving: boolean;
-  onSave: (id: string, update: { isEnabled: boolean; permissions: AuthUser['permissions'] }) => void;
+  onSave: (id: string, update: { isEnabled: boolean; canManagePermissions: boolean; permissions: AuthUser['permissions'] }) => void;
   onReset: (user: AuthUser) => void;
   onDelete: (user: AuthUser) => void;
   onViewDetails: (user: AuthUser) => void;
@@ -57,8 +57,8 @@ const permissionLabels = PERMISSION_DEFINITIONS.filter(
   (d: PermissionDefinition) => ['read', 'upload', 'edit'].includes(d.key),
 );
 
-/** 下载 / Markdown 编辑 / 分享由文件夹级 ACL 控制，不在此处全局设置。 */
-const aclNote = '下载、Markdown 编辑与对外分享权限由文件夹级 ACL 控制（管理员可绕过）。';
+/** 下载 / Markdown 编辑 / 分享由文件和文件夹条目 ACL 控制；账号权限仅作为默认权限使用。 */
+const aclNote = '文件和文件夹的访问权限可按员工单独配置；账号权限作为未单独授权时的默认权限。';
 
 const UserPermissionRow = memo(function UserPermissionRow({
   user,
@@ -73,18 +73,20 @@ const UserPermissionRow = memo(function UserPermissionRow({
   onEditPermissions,
 }: UserPermissionRowProps & { onEditPermissions: (user: AuthUser) => void }) {
   const [isEnabled, setIsEnabled] = useState(user.isEnabled);
+  const [canManagePermissions, setCanManagePermissions] = useState(user.canManagePermissions);
 
   useEffect(() => {
     setIsEnabled(user.isEnabled);
-  }, [user.isEnabled]);
+    setCanManagePermissions(user.canManagePermissions);
+  }, [user.isEnabled, user.canManagePermissions]);
 
   const isAdmin = user.role === 'admin';
   const isSelf = user.id === currentUser.id;
-  const dirty = isEnabled !== user.isEnabled;
+  const dirty = isEnabled !== user.isEnabled || canManagePermissions !== user.canManagePermissions;
   const selectable = !isAdmin && !isSelf;
 
   return (
-    <article className={`user-access-row ${!isEnabled ? 'is-disabled' : ''}`}>
+    <article className={`user-access-row ${!isEnabled ? 'is-disabled' : ''} ${selected ? 'is-selected' : ''}`}>
       <header className="user-access-row__identity">
         {selectable ? (
           <label className="user-select-check" title={selected ? '取消选择' : '选择此用户'}>
@@ -102,11 +104,15 @@ const UserPermissionRow = memo(function UserPermissionRow({
         <div>
           <strong>{user.username}{isSelf ? '（你）' : ''}</strong>
           <span>
-            {isAdmin
-              ? '管理员 · 始终拥有全部权限'
-              : (user.lastLoginAt
-                ? `上次登录 ${formatDate(user.lastLoginAt)}`
-                : `尚未登录 · 注册于 ${formatDate(user.createdAt)}`)}
+            {user.lastLoginAt ? `上次登录 ${formatDate(user.lastLoginAt)}` : `注册于 ${formatDate(user.createdAt)}`}
+          </span>
+        </div>
+        <div className="user-access-row__status">
+          <span className={`status-pill ${isAdmin ? 'status-pill--admin' : 'status-pill--user'}`}>
+            {isAdmin ? '管理员' : '普通用户'}
+          </span>
+          <span className={`status-pill ${isEnabled ? 'status-pill--enabled' : 'status-pill--disabled'}`}>
+            {isEnabled ? '启用' : '停用'}
           </span>
         </div>
         <label className="account-toggle">
@@ -125,7 +131,8 @@ const UserPermissionRow = memo(function UserPermissionRow({
         <div className="user-access-row__perms-summary">
           {permissionLabels.map(({ key, title }) => (
             <span key={key} className={`perm-chip ${user.permissions[key] ? 'is-on' : ''}`} title={`${title}：${user.permissions[key] ? '已开启' : '已关闭'}`}>
-              {title}
+              <span>{title}</span>
+              <small>{user.permissions[key] ? '开' : '关'}</small>
             </span>
           ))}
         </div>
@@ -139,7 +146,22 @@ const UserPermissionRow = memo(function UserPermissionRow({
         </button>
       </div>
 
+      {!isAdmin ? (
+        <label className="account-toggle user-permission-manager-toggle">
+          <input
+            type="checkbox"
+            checked={canManagePermissions}
+            onChange={(event) => setCanManagePermissions(event.target.checked)}
+            disabled={saving}
+          />
+          <span>允许管理文件和文件夹权限</span>
+        </label>
+      ) : null}
+
       <footer className="user-access-row__footer">
+        <span className="user-access-row__hint">
+          {isAdmin ? '管理员始终拥有全部权限' : (!isEnabled ? '停用后，该用户的已登录会话会立即失效。' : aclNote)}
+        </span>
         <div className="user-access-row__actions">
           <button
             className="icon-button"
@@ -177,17 +199,12 @@ const UserPermissionRow = memo(function UserPermissionRow({
           ) : null}
         </div>
         <div className="user-access-row__save">
-          {!isAdmin && !isEnabled ? (
-            <span>停用后，该用户的已登录会话会立即失效。</span>
-          ) : (
-            <span />
-          )}
           {!isAdmin ? (
             <button
               className="button button--primary"
               type="button"
               disabled={!dirty || saving}
-              onClick={() => onSave(user.id, { isEnabled, permissions: user.permissions })}
+              onClick={() => onSave(user.id, { isEnabled, canManagePermissions, permissions: user.permissions })}
             >
               {saving ? <LoaderCircle className="spin" size={17} /> : null}
               {saving ? '保存中…' : '保存设置'}
@@ -227,7 +244,7 @@ function CreateUserDialog({ onClose, onCreated }: {
   };
 
   return (
-    <Modal title="新建用户" description="为局域网成员开通账号并预设权限。下载、Markdown 编辑与分享由文件夹级 ACL 控制。" onClose={onClose} size="medium">
+    <Modal title="新建用户" description="为局域网成员开通账号并预设权限。账号权限作为默认权限；下载、Markdown 编辑与分享由文件夹级 ACL 按目录控制。" onClose={onClose} size="medium">
       <form className="user-create-form" onSubmit={submit}>
         {create.isError ? (
           <div className="notice notice--error" role="alert">{errorMessage(create.error)}</div>
@@ -516,7 +533,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
     queryFn: api.listUsers,
   });
   const updateAccess = useMutation({
-    mutationFn: ({ id, update }: { id: string; update: { isEnabled: boolean; permissions: AuthUser['permissions'] } }) =>
+    mutationFn: ({ id, update }: { id: string; update: { isEnabled: boolean; canManagePermissions: boolean; permissions: AuthUser['permissions'] } }) =>
       api.updateUserAccess(id, update),
     onSuccess: ({ user }) => {
       queryClient.setQueryData<{ users: AuthUser[] }>(['admin-users'], (current) => ({
@@ -596,6 +613,8 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
       total: list.length,
       enabled: list.filter((u) => u.isEnabled).length,
       disabled: list.filter((u) => !u.isEnabled).length,
+      admins: list.filter((u) => u.role === 'admin').length,
+      regular: list.filter((u) => u.role !== 'admin').length,
     };
   }, [users.data]);
 
@@ -603,7 +622,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
     <>
       <Modal
         title="用户与权限"
-        description="管理账号、角色、存储配额与水印配置。全局权限仅读取/上传/编辑；下载、Markdown 编辑与分享由文件夹级 ACL 控制。"
+        description="管理账号、角色、存储配额与水印配置。账号权限作为默认权限（文件夹 ACL 未覆盖时生效）；下载、Markdown 编辑与分享由文件夹级 ACL 按目录控制。管理员始终拥有全部权限。"
         onClose={onClose}
         size="xlarge"
       >
@@ -666,9 +685,28 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
             <WatermarkConfigPanel />
           ) : (
             <>
+              <div className="user-management__overview" aria-label="用户概览">
+                <div>
+                  <span>账号总数</span>
+                  <strong>{counters.total}</strong>
+                </div>
+                <div>
+                  <span>已启用</span>
+                  <strong>{counters.enabled}</strong>
+                </div>
+                <div>
+                  <span>已停用</span>
+                  <strong>{counters.disabled}</strong>
+                </div>
+                <div>
+                  <span>普通用户</span>
+                  <strong>{counters.regular}</strong>
+                </div>
+              </div>
+
               <div className="permission-note">
                 <UsersRound size={20} />
-                <div><strong>六维权限独立控制</strong><span>读取、下载、上传、编辑、Markdown 编辑和对外分享分别授权；管理员始终拥有全部权限。</span></div>
+                <div><strong>默认权限</strong><span>这里设置账号的读取、上传、编辑；下载、Markdown 编辑和对外分享由文件夹级 ACL 按目录控制（未覆盖时不生效）。管理员始终拥有全部权限。</span></div>
               </div>
 
               <div className="user-management__toolbar">
@@ -870,7 +908,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
           onClose={() => setPermsTarget(null)}
           saving={updateAccess.isPending && updateAccess.variables?.id === permsTarget.id}
           onSave={(permissions) => {
-            updateAccess.mutate({ id: permsTarget.id, update: { isEnabled: permsTarget.isEnabled, permissions } });
+            updateAccess.mutate({ id: permsTarget.id, update: { isEnabled: permsTarget.isEnabled, canManagePermissions: permsTarget.canManagePermissions, permissions } });
             setPermsTarget(null);
           }}
         />

@@ -4,9 +4,10 @@ import { FolderLock, LoaderCircle, RotateCcw, Save, ShieldCheck } from 'lucide-r
 import { api } from '../../api/client';
 import { Modal } from '../../components/Modal';
 import { Toast, type ToastMessage } from '../../components/Toast';
-import type { FolderAclInfo, PermissionSet } from '../../types';
+import type { FileRecord, ItemAclInfo, PermissionSet } from '../../types';
 import { errorMessage } from '../../utils/format';
 import { PermissionGrid, permissionSummaryText } from '../common/PermissionCard';
+import { PermissionChainViewer } from '../admin/PermissionChainViewer';
 
 const permissionLabels: Array<{
   key: keyof PermissionSet;
@@ -21,39 +22,61 @@ const permissionLabels: Array<{
   { key: 'share', title: '对外分享', description: '为当前目录或文件创建分享链接' },
 ];
 
-function folderLabel(folderId: string): string {
-  return folderId === 'ROOT' ? '根目录默认策略' : `目录 ${folderId.slice(0, 8)}…`;
-}
-
-export function FolderPermissionsDialog({
-  folderId,
+export function ItemPermissionsDialog({
+  item,
+  canViewChain,
   onClose,
 }: {
-  folderId: string;
+  item: FileRecord;
+  canViewChain: boolean;
   onClose: () => void;
 }) {
+  const itemId = item.id;
   const queryClient = useQueryClient();
+  const [showPermissionChain, setShowPermissionChain] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const aclUsers = useQuery({ queryKey: ['acl-users'], queryFn: api.listAclUsers });
+  const [selectedUserId, setSelectedUserId] = useState('');
+  useEffect(() => {
+    if (!aclUsers.data?.users.length) {
+      setSelectedUserId('');
+      return;
+    }
+    if (!aclUsers.data.users.some((user) => user.id === selectedUserId)) {
+      setSelectedUserId(aclUsers.data.users[0].id);
+    }
+  }, [aclUsers.data, selectedUserId]);
   const query = useQuery({
-    queryKey: ['folder-permissions', folderId],
-    queryFn: () => api.getFolderPermissions(folderId),
+    queryKey: ['item-permissions', itemId, selectedUserId],
+    queryFn: () => api.getItemPermissions(itemId, selectedUserId),
+    enabled: Boolean(selectedUserId),
   });
   const update = useMutation({
-    mutationFn: (permissions: PermissionSet) => api.updateFolderPermissions({ folderId, permissions }),
+    mutationFn: (permissions: PermissionSet) => api.updateItemPermissions({ itemId, userId: selectedUserId, permissions }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['folder-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['item-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['effective-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['effective-file-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['permission-chain'] });
+      void queryClient.invalidateQueries({ queryKey: ['permissions-all'] });
+      void queryClient.invalidateQueries({ queryKey: ['permissions-health'] });
       void queryClient.invalidateQueries({ queryKey: ['files'] });
       void queryClient.invalidateQueries({ queryKey: ['path'] });
-      setToast({ id: Date.now(), text: '目录权限已更新', tone: 'success' });
+      setToast({ id: Date.now(), text: '条目权限已更新', tone: 'success' });
     },
     onError: (error) => setToast({ id: Date.now(), text: errorMessage(error), tone: 'error' }),
   });
   const inherit = useMutation({
-    mutationFn: () => api.updateFolderPermissions({ folderId, inheritParent: true }),
+    mutationFn: () => api.updateItemPermissions({ itemId, userId: selectedUserId, inheritParent: true }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['folder-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['item-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['effective-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['effective-file-permissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['permission-chain'] });
+      void queryClient.invalidateQueries({ queryKey: ['permissions-all'] });
+      void queryClient.invalidateQueries({ queryKey: ['permissions-health'] });
       void queryClient.invalidateQueries({ queryKey: ['files'] });
-      setToast({ id: Date.now(), text: '已恢复继承父目录权限', tone: 'success' });
+      setToast({ id: Date.now(), text: '已恢复继承上级权限', tone: 'success' });
     },
     onError: (error) => setToast({ id: Date.now(), text: errorMessage(error), tone: 'error' }),
   });
@@ -81,13 +104,25 @@ export function FolderPermissionsDialog({
 
   return (
     <Modal
-      title="目录权限"
-      description={`正在配置“${folderLabel(folderId)}”。子目录默认继承最近一层显式策略。`}
+      title={item.kind === 'folder' ? '文件夹权限' : '文件权限'}
+      description={`正在配置“${item.name}”。${item.kind === 'folder' ? '子项默认继承本文件夹策略。' : '这项设置只作用于当前文件。'}`}
       onClose={onClose}
       size="medium"
     >
-      {query.isPending ? (
+      {query.isPending && selectedUserId ? (
         <div className="surface-state"><LoaderCircle className="spin" size={24} /><span>正在读取权限…</span></div>
+      ) : null}
+      {aclUsers.isError ? <div className="notice notice--error" role="alert">{errorMessage(aclUsers.error)}</div> : null}
+      {aclUsers.data && aclUsers.data.users.length === 0 ? (
+        <div className="surface-state surface-state--empty">当前没有可授权的普通员工账号。</div>
+      ) : null}
+      {aclUsers.data?.users.length ? (
+        <label className="field item-permissions-user-select">
+          <span>授权员工</span>
+          <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}>
+            {aclUsers.data.users.map((user) => <option key={user.id} value={user.id}>{user.username}</option>)}
+          </select>
+        </label>
       ) : null}
       {query.isError ? (
         <div className="notice notice--error" role="alert">
@@ -96,13 +131,20 @@ export function FolderPermissionsDialog({
         </div>
       ) : null}
       {acl && permissions ? (
-        <form className="user-create-form" onSubmit={submit}>
+        <form className="user-create-form item-permissions-form" onSubmit={submit}>
           <div className="permission-note">
             <ShieldCheck size={18} />
             <div>
-              <strong>{acl.inheritParent ? '当前目录继承上级权限' : '当前目录有显式权限'}</strong>
-              <span>生效来源：{acl.source === 'root' ? '根目录默认策略' : acl.source === 'folder' ? '本目录或上级目录' : '账号遗留权限'}；管理员始终绕过 ACL。</span>
+              <strong>{acl.inheritParent ? `${acl.username} 当前继承上级权限` : `${acl.username} 当前有单独授权`}</strong>
+              <span>配置来源：{acl.source === 'item' ? '员工条目授权' : acl.source === 'root' ? '根目录默认策略' : acl.source === 'folder' ? '上级文件夹 ACL' : '账号基线'}。</span>
             </div>
+            {canViewChain ? <button
+              className="button button--secondary button--sm"
+              type="button"
+              onClick={() => setShowPermissionChain(true)}
+            >
+              查看权限链
+            </button> : null}
           </div>
           <fieldset className="create-permissions">
             <legend>六维权限卡片</legend>
@@ -113,7 +155,7 @@ export function FolderPermissionsDialog({
             />
           </fieldset>
           <div className="user-details__note">
-            <FolderLock size={14} />生效权限：{permissionSummaryText(effective ?? permissions)}
+            <FolderLock size={14} />继承后的配置：{permissionSummaryText(effective ?? permissions)}
           </div>
           <div className="user-create-form__footer">
             <button
@@ -122,7 +164,7 @@ export function FolderPermissionsDialog({
               onClick={() => inherit.mutate()}
               disabled={busy || acl.inheritParent}
             >
-              <RotateCcw size={16} />恢复继承
+              <RotateCcw size={16} />恢复上级继承
             </button>
             <button className="button button--primary" type="submit" disabled={!dirty || busy}>
               {update.isPending ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}保存权限
@@ -131,8 +173,14 @@ export function FolderPermissionsDialog({
         </form>
       ) : null}
       {toast ? <Toast message={toast} onDismiss={() => setToast(null)} /> : null}
+      {showPermissionChain && canViewChain ? (
+        <PermissionChainViewer
+          initialFolderId={itemId}
+          onClose={() => setShowPermissionChain(false)}
+        />
+      ) : null}
     </Modal>
   );
 }
 
-export type { FolderAclInfo };
+export type { ItemAclInfo };

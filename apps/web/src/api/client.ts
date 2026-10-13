@@ -14,8 +14,10 @@ import type {
   FileListResponse,
   FilePreviewResponse,
   FileRecord,
-  FolderAclResponse,
-  FolderAclUpdateInput,
+  PermissionSet,
+  FolderAclListEntry,
+  ItemAclResponse,
+  ItemAclUpdateInput,
   Invite,
   InviteCreateInput,
   InvitesResponse,
@@ -38,6 +40,8 @@ import type {
   UsersResponse,
   WatermarkConfig,
   WatermarkConfigResponse,
+  PermissionsHealth,
+  PermissionChainInfo,
 } from '../types';
 
 interface ErrorBody {
@@ -82,6 +86,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return body as T;
+}
+
+/**
+ * 请求端点为纯文本/CSV 等非 JSON 响应的变体（如活动审计 CSV 导出）。
+ * 错误时仍解析 JSON 错误体并抛 ApiError，成功时返回 response.text()。
+ */
+async function requestText(path: string, init?: RequestInit): Promise<string> {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+  const response = await fetch(path, {
+    ...init,
+    headers,
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => undefined) as ErrorBody | undefined;
+    const error = body?.error;
+    throw new ApiError(
+      error?.message ?? `请求失败（${response.status}）`,
+      response.status,
+      error?.code,
+      error?.details,
+    );
+  }
+  return response.text();
 }
 
 function queryString(params: FileListParams): string {
@@ -177,12 +206,24 @@ export const api = {
   deleteFile: (id: string) => request<{ ok: boolean }>(`/api/files/${id}`, { method: 'DELETE' }),
 
   // ----- 文件夹级权限（六维 ACL，docs/v0.1.2-plan.md §5.4） -----
-  getFolderPermissions: (folderId: string) =>
-    request<FolderAclResponse>(`/api/admin/permissions${encodeQuery({ folderId })}`),
-  updateFolderPermissions: (input: FolderAclUpdateInput) => request<FolderAclResponse>(
+  getItemPermissions: (itemId: string, userId: string) =>
+    request<ItemAclResponse>(`/api/admin/permissions${encodeQuery({ itemId, userId })}`),
+  getEffectivePermissions: (folderId: string) =>
+    request<{ permissions: PermissionSet }>(`/api/permissions/effective${encodeQuery({ folderId })}`),
+  getEffectiveFilePermissions: (fileId: string) =>
+    request<{ permissions: PermissionSet }>(`/api/permissions/effective${encodeQuery({ fileId })}`),
+  updateItemPermissions: (input: ItemAclUpdateInput) => request<ItemAclResponse>(
     '/api/admin/permissions',
     { method: 'PUT', body: JSON.stringify(input) },
   ),
+  listAclUsers: () => request<UsersResponse>('/api/permissions/acl-users'),
+  // 管理员扩展接口
+  getFolderAcls: () => request<{ acls: FolderAclListEntry[]; totalCount: number }>(
+    '/api/admin/permissions/all',
+  ),
+  getPermissionsHealth: () => request<PermissionsHealth>('/api/admin/permissions-health'),
+  getPermissionChain: (userId: string, itemId: string) =>
+    request<{ chain: PermissionChainInfo }>(`/api/admin/permissions-chain${encodeQuery({ userId, itemId })}`),
 
   // ----- 公开分享链接（docs/v0.1.2-plan.md §4.3；服务端 routes/shares.ts） -----
   createShareLink: (input: CreateShareLinkInput) => request<CreateShareLinkResponse>('/api/share-links', {
@@ -213,7 +254,7 @@ export const api = {
   listActivity: (params: ActivityListParams = {}) =>
     request<ActivityListResponse>(`/api/admin/activity${encodeQuery(params)}`),
   exportActivityCsv: (params: ActivityListParams = {}) =>
-    request<string>(`/api/admin/activity/export${encodeQuery(params)}`),
+    requestText(`/api/admin/activity/export${encodeQuery(params)}`),
 
   // ----- 动态水印配置（docs/v0.1.2-plan.md §6.1） -----
   getWatermarkConfig: () => request<WatermarkConfigResponse>('/api/admin/watermark-config'),
@@ -231,14 +272,45 @@ export const api = {
   previewFile: (id: string) => request<FilePreviewResponse>(`/api/files/${id}/preview`),
 
   // ----- 公开分享（匿名访问，docs/v0.1.2-plan.md §4.3–4.4） -----
-  getPublicShareInfo: (token: string) => request<PublicShareResponse>(`/api/public/shares/${token}/info`),
+  // 密码保护分享：/verify 通过后由 rememberPublicSharePassword 缓存密码，
+  // 后续 info/tree/content 请求以 x-share-password 头自动携带，
+  // 使服务端 resolveShareForAccess 的密码校验在解锁后的所有请求中都能通过。
+  getPublicShareInfo: (token: string) =>
+    request<PublicShareResponse>(`/api/public/shares/${token}/info`, publicShareRequestInit(token)),
   getPublicShareTree: (token: string) =>
-    request<PublicShareTreeResponse>(`/api/public/shares/${token}/tree`),
+    request<PublicShareTreeResponse>(
+      `/api/public/shares/${token}/tree`,
+      publicShareRequestInit(token),
+    ),
   getPublicShareContent: (token: string, fileId: string) =>
-    request<PublicShareContentResponse>(`/api/public/shares/${token}/files/${fileId}/content`),
+    request<PublicShareContentResponse>(
+      `/api/public/shares/${token}/files/${fileId}/content`,
+      publicShareRequestInit(token),
+    ),
   verifyPublicSharePassword: (token: string, input: PublicShareVerifyInput) =>
     request<{ ok: boolean }>(`/api/public/shares/${token}/verify`, { method: 'POST', body: JSON.stringify(input) }),
 };
+
+// ----- 公开分享密码缓存（模块级；按 token 记录通过验证的密码） -----
+const publicSharePasswords = new Map<string, string>();
+
+/** 记录某分享已通过验证的密码（供后续 info/tree/content 请求自动携带）。 */
+export function rememberPublicSharePassword(token: string, password: string): void {
+  publicSharePasswords.set(token, password);
+}
+
+/** 清除某分享的缓存密码（切换 token / 重新锁定时调用）。 */
+export function forgetPublicSharePassword(token: string): void {
+  publicSharePasswords.delete(token);
+}
+
+function publicShareRequestInit(token: string): RequestInit {
+  const cached = publicSharePasswords.get(token);
+  if (!cached) return {};
+  const headers = new Headers();
+  headers.set('x-share-password', cached);
+  return { headers };
+}
 
 export function uploadFile(
   file: File,
@@ -305,4 +377,9 @@ export function publicShareDownloadUrl(token: string): string {
 
 export function publicShareStreamUrl(token: string): string {
   return `/api/public/shares/${token}/stream`;
+}
+
+/** 公开分享的 Markdown → PDF 渲染预览（inline，带分享者溯源水印）。 */
+export function publicShareExportPdfUrl(token: string): string {
+  return `/api/public/shares/${token}/export-pdf`;
 }

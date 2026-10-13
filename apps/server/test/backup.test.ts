@@ -42,12 +42,12 @@ describe('备份脚本（SQLite 在线备份 + 对象归档 + 保留策略）', 
     expect(result.copiedObjects).toBe(2);
     expect(result.pruned).toEqual([]);
 
-    // 快照可独立打开且 schema 完整
+    // 快照可独立打开且 schema 完整（v0.1.2：迁移版本 user_version = 8）
     const snapshot = new Database(result.dbSnapshot, { readonly: true });
     const version = snapshot.pragma('user_version', { simple: true });
     const userCount = (snapshot.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
     snapshot.close();
-    expect(version).toBe(6);
+    expect(version).toBe(8);
     expect(userCount).toBe(1);
 
     // 备份目录结构

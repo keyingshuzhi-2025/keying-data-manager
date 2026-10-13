@@ -5,7 +5,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import Database from 'better-sqlite3';
+import type { AppSqliteDatabase } from './db/node-sqlite.js';
 import type { AppConfig } from './config.js';
 import { forbidden, unauthorized } from './errors.js';
 import type { AuthUser, UserPermission } from './types.js';
@@ -20,6 +20,7 @@ export interface UserRow {
   can_read: number;
   can_upload: number;
   can_edit: number;
+  can_manage_permissions: number;
   storage_quota_bytes: number;
   created_at: string;
   last_login_at: string | null;
@@ -45,6 +46,7 @@ export function mapUser(row: UserRow): AuthUser {
     username: row.username,
     role: row.role,
     isEnabled: Boolean(row.is_enabled),
+    canManagePermissions: isAdmin || Boolean(row.can_manage_permissions),
     // v0.1.2：六维权限。遗留 users.can_* 保留在库中，作为未命中文件夹 ACL 时的基线；
     // download 与历史行为一致（可读即可下载）；editMd/share 为新增维度，遗留默认关闭。
     permissions: isAdmin ? {
@@ -69,7 +71,7 @@ export function mapUser(row: UserRow): AuthUser {
 }
 
 /** 更新指定用户的最后登录时间为当前时刻 */
-export function recordLastLogin(db: Database.Database, userId: string): void {
+export function recordLastLogin(db: AppSqliteDatabase, userId: string): void {
   db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(
     new Date().toISOString(),
     userId,
@@ -96,9 +98,9 @@ export function verifyPassword(password: string, encoded: string): boolean {
   }
 }
 
-export function initializeAdmin(db: Database.Database, config: AppConfig): AuthUser {
+export function initializeAdmin(db: AppSqliteDatabase, config: AppConfig): AuthUser {
   const existing = db.prepare(
-    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
+    `SELECT id, username, role, is_enabled, can_read, can_upload, can_edit, can_manage_permissions, storage_quota_bytes, created_at, last_login_at
      FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).get(config.adminUsername) as UserRow | undefined;
   if (existing) {
@@ -114,6 +116,7 @@ export function initializeAdmin(db: Database.Database, config: AppConfig): AuthU
       can_read: 1,
       can_upload: 1,
       can_edit: 1,
+      can_manage_permissions: 1,
     });
   }
 
@@ -133,6 +136,7 @@ export function initializeAdmin(db: Database.Database, config: AppConfig): AuthU
     can_read: 1,
     can_upload: 1,
     can_edit: 1,
+    can_manage_permissions: 0,
     storage_quota_bytes: 0,
     created_at: now,
     last_login_at: null,
@@ -140,7 +144,7 @@ export function initializeAdmin(db: Database.Database, config: AppConfig): AuthU
 }
 
 export function createSession(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   userId: string,
   ttlMs: number,
   meta?: { ip?: string; userAgent?: string },
@@ -162,17 +166,17 @@ export function createSession(
   return { token, expiresAt: expiresAt.toISOString() };
 }
 
-export function deleteSession(db: Database.Database, token: string | undefined): void {
+export function deleteSession(db: AppSqliteDatabase, token: string | undefined): void {
   if (!token) return;
   db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
 }
 
-export function deleteExpiredSessions(db: Database.Database): void {
+export function deleteExpiredSessions(db: AppSqliteDatabase): void {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(new Date().toISOString());
 }
 
 export async function getSessionUser(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   request: FastifyRequest,
 ): Promise<AuthUser | null> {
   const token = request.cookies?.[SESSION_COOKIE_NAME];
@@ -180,7 +184,7 @@ export async function getSessionUser(
 
   const row = db.prepare(
     `SELECT u.id, u.username, u.role, u.is_enabled,
-            u.can_read, u.can_upload, u.can_edit, u.storage_quota_bytes,
+            u.can_read, u.can_upload, u.can_edit, u.can_manage_permissions, u.storage_quota_bytes,
             u.created_at, u.last_login_at
      FROM sessions s
      JOIN users u ON u.id = s.user_id
@@ -192,7 +196,7 @@ export async function getSessionUser(
 }
 
 export async function requireUser(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   request: FastifyRequest,
 ): Promise<AuthUser> {
   const user = await getSessionUser(db, request);
@@ -202,7 +206,7 @@ export async function requireUser(
 }
 
 export async function requirePermission(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   request: FastifyRequest,
   permission: UserPermission,
 ): Promise<AuthUser> {
@@ -216,7 +220,7 @@ export async function requirePermission(
 }
 
 export async function requireAdmin(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   request: FastifyRequest,
 ): Promise<AuthUser> {
   const user = await requireUser(db, request);

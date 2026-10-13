@@ -71,6 +71,7 @@ export interface AuthUser {
   username: string;
   role: 'admin' | 'user';
   isEnabled: boolean;
+  canManagePermissions: boolean;
   permissions: Permissions;
   /** 存储配额上限字节数；0 表示不限制 */
   storageQuotaBytes: number;
@@ -91,6 +92,7 @@ export interface UsersResponse {
 
 export interface UserAccessUpdate {
   isEnabled?: boolean;
+  canManagePermissions?: boolean;
   permissions?: AuthUser['permissions'];
   /** v0.1.2：管理员调整存储配额（>=0，0 表示不限制） */
   storageQuotaBytes?: number;
@@ -195,36 +197,91 @@ export interface ActivityListResponse {
 /** 活动日志 CSV 导出（v0.1.2 新增） */
 export type ActivityExportResponse = string;
 
-// ----- 文件夹级权限（六维 ACL，docs/v0.1.2-plan.md §5） -----
-export type PermissionSource = 'admin' | 'folder' | 'root' | 'legacy';
+// ----- 文件与文件夹权限（六维 ACL） -----
+export type PermissionSource = 'admin' | 'item' | 'folder' | 'root' | 'legacy';
 
-/** 文件夹权限的读取结果：本目录显式设置 + 沿目录链继承解析后的生效权限 */
-export interface FolderAclInfo {
-  folderId: string;
-  /** 本目录显式设置的六维权限；未设置（继承父目录）时为 null */
+/** 单个条目的权限：自身显式设置 + 从上级文件夹继承的配置 */
+export interface ItemAclInfo {
+  itemId: string;
+  userId: string;
+  username: string;
+  /** 自身显式设置的六维权限；未设置时为 null */
   permissions: PermissionSet | null;
-  /** 继承解析后的生效六维权限 */
+  /** 配置继承后的六维权限（不包含指定账号的基线） */
   effective: PermissionSet;
-  /** 生效来源：admin / folder / root / legacy */
+  /** 生效来源 */
   source: PermissionSource;
-  /** 生效来源的 folder_id（source 为 folder/root 时有效；否则为 null） */
-  sourceFolderId: string | null;
-  /** 是否继承父目录（本目录无显式设置时为 true） */
+  sourceItemId: string | null;
+  /** 是否继承上级 */
   inheritParent: boolean;
   updatedAt: string | null;
 }
 
-export interface FolderAclResponse {
-  acl: FolderAclInfo;
+export interface ItemAclResponse {
+  acl: ItemAclInfo;
 }
 
-/** 设置/恢复文件夹权限的输入；folderId 为 'ROOT' 时表示根目录默认策略 */
-export interface FolderAclUpdateInput {
-  folderId: string;
-  /** 设置本目录显式权限；缺省表示仅调整继承 */
+/** 设置/恢复文件或文件夹权限；itemId 为 'ROOT' 时表示全局默认策略 */
+export interface ItemAclUpdateInput {
+  itemId: string;
+  userId: string;
   permissions?: Partial<PermissionSet>;
-  /** true = 恢复继承父目录（清空本目录显式设置） */
+  /** true = 清空自身设置并恢复继承 */
   inheritParent?: boolean;
+}
+
+// ----- 文件夹级 ACL 管理扩展类型（管理员） -----
+
+/** 管理员只读：单个 ACL 条目（含目录名）。 */
+export interface FolderAclListEntry {
+  folderId: string;
+  name: string;
+  kind?: 'root' | 'folder' | 'file';
+  userId?: string;
+  username?: string;
+  permissions: PermissionSet;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+/** 管理员只读：健康检查发现。 */
+export interface HealthFinding {
+  code: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+}
+
+/** 管理员只读：ACL 健康检查。 */
+export interface PermissionsHealth {
+  ok: boolean;
+  tableExists: boolean;
+  tableVersion: number;
+  rootMode: 'open' | 'tighten' | 'unknown';
+  rootAclPresent: boolean;
+  aclRowCount: number;
+  findings: HealthFinding[];
+}
+
+/** 管理员只读：权限链每一跳。 */
+export interface AclHopInfo {
+  folderId: string;
+  name: string;
+  configured: PermissionSet | null;
+  configuredSource: 'item' | 'folder' | 'root' | 'none';
+  isEffective: boolean;
+  parentId: string | null;
+  inheritedFromNearby: boolean;
+  inheritedFromRoot: boolean;
+}
+
+/** 管理员只读：用户在目标上的完整权限链。 */
+export interface PermissionChainInfo {
+  target: { kind: 'root' } | { kind: 'folder' | 'file'; id: string };
+  hops: AclHopInfo[];
+  effective: PermissionSet;
+  source: PermissionSource;
+  folderId: string | null;
+  userBaseline: PermissionSet;
 }
 
 // ----- 公开分享链接（docs/v0.1.2-plan.md §4；服务端 routes/shares.ts 的 API 形态） -----

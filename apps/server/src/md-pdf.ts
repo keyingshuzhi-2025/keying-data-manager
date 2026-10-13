@@ -1,28 +1,23 @@
 /**
- * MD → PDF 渲染器（v0.1.2 M5 的轻量实现，见 docs/v0.1.2-plan.md §6.3）。
+ * MD → PDF 渲染器（v0.1.2 M5，见 docs/v0.1.2-plan.md §6.3）。
  *
- * 链路：markdown-it(GFM) → HTML → 结构化文本 → pdf-lib 分页绘制，
+ * 链路：markdown-it(GFM) → HTML → 结构化文本行 → CJK 感知折行分页 →
+ *       每页渲染为 SVG，文本由 sharp/libvips 使用系统中文字体光栅化为 PNG →
+ *       pdf-lib 整页嵌入 → PDF。
  * 每页叠加半透明身份水印（`{username}`/日期时间由调用方解析后传入 watermark）。
  *
- * 中文渲染：当前轻量实现使用 pdf-lib 标准字体，中文内容可能缺字；后续可替换为
- * Chromium + Noto Sans CJK 或 pdf-lib + 自定义 TTF 的渲染器实现。
- * 渲染器接口化：后续 puppeteer（Chromium + Noto Sans CJK）实现可无缝替换本实现。
+ * 中文渲染：pdf-lib 标准字体（WinAnsi）无法编码中文（会抛
+ * `WinAnsi cannot encode`），因此文本一律经 SVG + 系统字体
+ * （微软雅黑 / PingFang / Noto Sans CJK）光栅化后嵌入，中英文与代码均可显示。
  */
 
 import MarkdownIt from 'markdown-it';
-import {
-  degrees,
-  PDFDocument,
-  type PDFFont,
-  rgb,
-  StandardFonts,
-} from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
+import sharp from 'sharp';
 
 export interface PdfRenderOptions {
   /** 文档标题（页脚显示） */
   title?: string;
-  /** 每页叠加的身份水印文案 */
-  watermark?: string;
 }
 
 export interface PdfRenderer {
@@ -95,113 +90,206 @@ function htmlToLines(html: string): TextLine[] {
   return lines;
 }
 
-/** 按宽度折行；单词超宽（CJK 无空格场景）时逐字断行。 */
-function wrapText(
-  text: string,
-  font: PDFFont,
-  size: number,
-  maxWidth: number,
-): string[] {
-  const words = text.split(/\s+/);
+const PAGE_WIDTH = 595.28; // A4（pt）
+const PAGE_HEIGHT = 841.89;
+const MARGIN = 56;
+const LINE_GAP = 3;
+/** 光栅化倍率：72pt 版面 → 2x 像素（约 144 DPI），保证文字清晰 */
+const SCALE = 2;
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function isCjkCodePoint(cp: number): boolean {
+  return (cp >= 0x2e80 && cp <= 0x9fff)      // CJK 部首 + 统一表意
+    || (cp >= 0x3000 && cp <= 0x303f)        // CJK 标点
+    || (cp >= 0xff00 && cp <= 0xff60)        // 全角字符
+    || cp >= 0x20000;                        // CJK 扩展
+}
+
+/** 单字符估宽（相对字号的倍率）：CJK 全宽 ≈ 1.0，窄字符 ≈ 0.32，其余拉丁 ≈ 0.55 */
+function charWidthRatio(cp: number): number {
+  if (isCjkCodePoint(cp)) return 1.0;
+  const ch = String.fromCodePoint(cp);
+  if (' ilj|!.,;:\'`'.includes(ch)) return 0.32;
+  if ('tfrI()[]{}/\\'.includes(ch)) return 0.4;
+  return 0.55;
+}
+
+/** 估算文本宽度（pt） */
+function textWidth(text: string, size: number): number {
+  let width = 0;
+  for (const ch of text) {
+    width += charWidthRatio(ch.codePointAt(0) ?? 0) * size;
+  }
+  return width;
+}
+
+/** 按估宽折行：CJK 可逐字断行，拉丁按空格断词，超宽单词逐字硬断 */
+function wrapText(text: string, size: number, maxWidth: number): string[] {
+  const tokens: string[] = [];
+  let latin = '';
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (isCjkCodePoint(cp)) {
+      if (latin) { tokens.push(latin); latin = ''; }
+      tokens.push(ch);
+    } else if (ch === ' ' || ch === '\t') {
+      if (latin) { tokens.push(latin); latin = ''; }
+      tokens.push(' ');
+    } else {
+      latin += ch;
+    }
+  }
+  if (latin) tokens.push(latin);
+
+  const spaceWidth = charWidthRatio(0x20) * size;
   const lines: string[] = [];
   let current = '';
-  for (const word of words) {
-    if (!word) continue;
-    const candidate = current ? `${current} ${word}` : word;
-    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
-      current = candidate;
+  let currentWidth = 0;
+
+  for (const token of tokens) {
+    if (token === ' ') {
+      if (current) {
+        current += ' ';
+        currentWidth += spaceWidth;
+      }
+      continue;
+    }
+    const tokenWidth = textWidth(token, size);
+    if (current && currentWidth + tokenWidth <= maxWidth) {
+      current += token;
+      currentWidth += tokenWidth;
+      continue;
+    }
+    if (!current && tokenWidth <= maxWidth) {
+      current = token;
+      currentWidth = tokenWidth;
       continue;
     }
     if (current) {
       lines.push(current);
       current = '';
+      currentWidth = 0;
     }
-    if (font.widthOfTextAtSize(word, size) <= maxWidth) {
-      current = word;
+    if (tokenWidth <= maxWidth) {
+      current = token;
+      currentWidth = tokenWidth;
       continue;
     }
+    // 单词超宽（长 URL / 无空格长串）：逐字符硬断
     let segment = '';
-    for (const ch of word) {
-      if (segment && font.widthOfTextAtSize(segment + ch, size) > maxWidth) {
+    let segmentWidth = 0;
+    for (const ch of token) {
+      const w = charWidthRatio(ch.codePointAt(0) ?? 0) * size;
+      if (segment && segmentWidth + w > maxWidth) {
         lines.push(segment);
         segment = ch;
+        segmentWidth = w;
       } else {
         segment += ch;
+        segmentWidth += w;
       }
     }
     current = segment;
+    currentWidth = segmentWidth;
   }
   if (current) lines.push(current);
   return lines.length > 0 ? lines : [''];
 }
 
-const PAGE_WIDTH = 595.28; // A4
-const PAGE_HEIGHT = 841.89;
-const MARGIN = 56;
-const LINE_GAP = 3;
+const FONT_SANS = 'Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Source Han Sans SC, WenQuanYi Micro Hei, sans-serif';
+const FONT_MONO = 'Consolas, Courier New, SFMono-Regular, Menlo, monospace';
+
+/** 分页后的一个已折行文本段：y 为距页顶距离（pt） */
+interface LaidSegment {
+  text: string;
+  size: number;
+  font: TextLine['font'];
+  indent: number;
+  y: number;
+}
+
+/** 单页 → SVG（水印 + 正文 + 页脚）。 */
+function buildPageSvg(
+  segments: LaidSegment[],
+  options: PdfRenderOptions,
+  pageNumber: number,
+): string {
+  const pageW = Math.round(PAGE_WIDTH * SCALE);
+  const pageH = Math.round(PAGE_HEIGHT * SCALE);
+  const left = MARGIN * SCALE;
+
+  const parts: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${pageW}" height="${pageH}" viewBox="0 0 ${pageW} ${pageH}">`,
+    '<rect width="100%" height="100%" fill="#ffffff"/>',
+  ];
+
+  for (const segment of segments) {
+    const family = segment.font === 'code' ? FONT_MONO : FONT_SANS;
+    const weight = segment.font === 'bold' ? ' font-weight="bold"' : '';
+    parts.push(
+      `<text x="${Math.round((MARGIN + segment.indent * 12) * SCALE)}" ` +
+      `y="${Math.round((segment.y + segment.size) * SCALE)}" ` +
+      `font-family="${family}"${weight} font-size="${segment.size * SCALE}" fill="#1f1f1f">` +
+      `${escapeXml(segment.text)}</text>`,
+    );
+  }
+
+  const footer = [options.title, String(pageNumber)].filter(Boolean).join(' · ');
+  parts.push(
+    `<text x="${Math.round(MARGIN * SCALE)}" y="${pageH - Math.round(20 * SCALE)}" ` +
+    `font-family="${FONT_SANS}" font-size="${8 * SCALE}" fill="#8a8a8a">` +
+    `${escapeXml(footer)}</text>`,
+  );
+  parts.push('</svg>');
+  return parts.join('\n');
+}
 
 async function renderPdf(lines: TextLine[], options: PdfRenderOptions): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
+  if (options.title) {
+    try { pdfDoc.setTitle(options.title); } catch { /* 元数据可选 */ }
+  }
 
-  // The lightweight renderer uses pdf-lib standard fonts and does not require
-  // a browser or native fontkit binary.
-  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const codeFont = await pdfDoc.embedFont(StandardFonts.Courier);
-
-  const fontFor = (line: TextLine): PDFFont => {
-    if (line.font === 'code') return codeFont;
-    if (line.font === 'bold') return boldFont;
-    return bodyFont;
-  };
-
-  let page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  let y = PAGE_HEIGHT - MARGIN;
-  let pageNumber = 1;
-
-  const decorate = (target: typeof page): void => {
-    if (options.watermark) {
-      target.drawText(options.watermark, {
-        x: PAGE_WIDTH / 2,
-        y: PAGE_HEIGHT / 2,
-        size: 26,
-        font: boldFont,
-        color: rgb(0, 0, 0),
-        opacity: 0.06,
-        rotate: degrees(30),
-      });
-    }
-    target.drawText(
-      [options.title, String(pageNumber)].filter(Boolean).join(' · '),
-      { x: MARGIN, y: 28, size: 8, font: bodyFont, color: rgb(0.5, 0.5, 0.5) },
-    );
-  };
-  decorate(page);
+  // 1) 逐行折行 + 分页（y 游标）
+  const pages: LaidSegment[][] = [];
+  let pageSegments: LaidSegment[] = [];
+  let y = MARGIN;
 
   for (const line of lines) {
     const maxWidth = PAGE_WIDTH - MARGIN * 2 - line.indent * 12;
-    for (const segment of wrapText(line.text, fontFor(line), line.size, maxWidth)) {
-      if (y < MARGIN) {
-        page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-        y = PAGE_HEIGHT - MARGIN;
-        pageNumber += 1;
-        decorate(page);
+    for (const segment of wrapText(line.text, line.size, maxWidth)) {
+      if (y + line.size > PAGE_HEIGHT - MARGIN) {
+        pages.push(pageSegments);
+        pageSegments = [];
+        y = MARGIN;
       }
-      page.drawText(segment, {
-        x: MARGIN + line.indent * 12,
-        y,
-        size: line.size,
-        font: fontFor(line),
-        color: rgb(0.12, 0.12, 0.12),
-      });
-      y -= line.size + LINE_GAP;
+      pageSegments.push({ text: segment, size: line.size, font: line.font, indent: line.indent, y });
+      y += line.size + LINE_GAP;
     }
+  }
+  if (pageSegments.length > 0 || pages.length === 0) pages.push(pageSegments);
+
+  // 2) 每页 SVG →（sharp / 系统字体）PNG → 嵌入 A4 页面
+  const pdfPages = pages.map(() => pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]));
+  for (let index = 0; index < pages.length; index += 1) {
+    const svg = buildPageSvg(pages[index], options, index + 1);
+    const png = await sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toBuffer();
+    const image = await pdfDoc.embedPng(png);
+    pdfPages[index].drawImage(image, { x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT });
   }
 
   return Buffer.from(await pdfDoc.save());
 }
 
-/** 轻量默认渲染器：markdown-it + pdf-lib */
+/** 轻量默认渲染器：markdown-it + sharp(SVG 光栅化) + pdf-lib */
 export class PdfLibRenderer implements PdfRenderer {
   render(markdown: string, options?: PdfRenderOptions): Promise<Buffer> {
     const md = new MarkdownIt({ html: false, linkify: true, breaks: true });

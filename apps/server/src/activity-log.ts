@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { AppSqliteDatabase } from './db/node-sqlite.js';
 
 export type ActivityAction =
   | 'login'
@@ -25,6 +25,7 @@ export type ActivityAction =
   | 'sessions_revoke'
   | 'quota_change'
   | 'acl_change'
+  | 'permission_chain_view'
   | 'md_edit'
   | 'md_export'
   | 'share_create'
@@ -101,7 +102,7 @@ function mapActivityRow(row: {
 }
 
 /** 写入一条活动日志（不主动抛错，失败静默，避免影响主流程） */
-export function recordActivity(db: Database.Database, input: ActivityInput): void {
+export function recordActivity(db: AppSqliteDatabase, input: ActivityInput): void {
   try {
     db.prepare(
       `INSERT INTO activity_logs (id, user_id, action, target_type, target_name, detail, created_at)
@@ -121,7 +122,7 @@ export function recordActivity(db: Database.Database, input: ActivityInput): voi
 }
 
 export function listActivityForUser(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   userId: string,
   limit: number,
 ): ActivityRecord[] {
@@ -129,7 +130,7 @@ export function listActivityForUser(
 }
 
 export function listActivity(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   params: ActivityListParams,
 ): ActivityListResult {
   const page = Math.max(1, params.page);
@@ -216,6 +217,7 @@ export const ACTIVITY_LABELS: Record<ActivityAction, string> = {
   sessions_revoke: '强制下线全部会话',
   quota_change: '调整存储配额',
   acl_change: '调整文件夹权限',
+  permission_chain_view: '查看权限链',
   md_edit: '编辑 Markdown',
   md_export: '导出 PDF',
   share_create: '创建分享链接',

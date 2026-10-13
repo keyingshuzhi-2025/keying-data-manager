@@ -182,6 +182,7 @@ export interface AuthUser {
   username: string;
   role: 'admin' | 'user';
   isEnabled: boolean;
+  canManagePermissions: boolean;
   /**
    * v0.1.2：六维权限。read/download/upload/edit 由遗留 users.can_* 派生
    * （download = read，与历史"可读即可下载"一致）；editMd/share 为新增维度，

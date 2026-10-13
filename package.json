@@ -1,15 +1,18 @@
 {
   "name": "local-file-hub",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "concurrently --kill-others -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "scripts\\node22.cmd node_modules/tsx/dist/cli.mjs watch apps/server/src/index.ts",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node scripts/build-server.mjs && node scripts/run-server.mjs",
+    "dev:server:watch": "node scripts/watch-server.mjs",
+    "dev:server:tsx": "scripts\\node22.cmd node_modules/tsx/dist/cli.mjs watch apps/server/src/index.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
+    "dev:web:direct": "node node_modules/vite/bin/vite.js --config apps/web/vite.config.ts --configLoader native",
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc -p apps/server/tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",

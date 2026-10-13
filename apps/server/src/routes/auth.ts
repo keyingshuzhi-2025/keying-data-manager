@@ -45,6 +45,7 @@ const userSchema = z.object({
   username: z.string(),
   role: z.enum(['admin', 'user']),
   isEnabled: z.boolean(),
+  canManagePermissions: z.boolean(),
   permissions: z.object({
     read: z.boolean(),
     download: z.boolean(),
@@ -84,7 +85,7 @@ function parseOrThrow<T>(schema: z.ZodType<T>, value: unknown, message: string):
 function findLoginUser(context: RouteContext, username: string): (UserRow & { password_hash: string }) | undefined {
   return context.db.sqlite.prepare(
     `SELECT id, username, password_hash, role, is_enabled,
-            can_read, can_upload, can_edit, storage_quota_bytes, created_at, last_login_at
+            can_read, can_upload, can_edit, can_manage_permissions, storage_quota_bytes, created_at, last_login_at
      FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).get(username) as (UserRow & { password_hash: string }) | undefined;
 }
@@ -151,6 +152,7 @@ export function registerAuthRoutes(app: FastifyInstance, context: RouteContext):
       can_read: invite?.can_read ?? 0,
       can_upload: invite?.can_upload ?? 0,
       can_edit: invite?.can_edit ?? 0,
+      can_manage_permissions: 0,
       storage_quota_bytes: 0,
       created_at: new Date().toISOString(),
       last_login_at: null,

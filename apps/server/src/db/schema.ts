@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   can_read INTEGER NOT NULL DEFAULT 0,
   can_upload INTEGER NOT NULL DEFAULT 0,
   can_edit INTEGER NOT NULL DEFAULT 0,
+  can_manage_permissions INTEGER NOT NULL DEFAULT 0,
   storage_quota_bytes INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   last_login_at TEXT
@@ -107,6 +108,24 @@ CREATE TABLE IF NOT EXISTS folder_permissions (
   updated_by TEXT,
   updated_at TEXT NOT NULL
 );
+
+-- v8：管理员对指定员工和具体文件/文件夹设置六维权限。
+CREATE TABLE IF NOT EXISTS item_permissions (
+  item_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  can_read INTEGER NOT NULL DEFAULT 0,
+  can_download INTEGER NOT NULL DEFAULT 0,
+  can_upload INTEGER NOT NULL DEFAULT 0,
+  can_edit INTEGER NOT NULL DEFAULT 0,
+  can_edit_md INTEGER NOT NULL DEFAULT 0,
+  can_share INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (item_id, user_id),
+  FOREIGN KEY (item_id) REFERENCES files(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_item_permissions_user ON item_permissions(user_id);
 
 -- v6：公开分享链接（匿名 · 限时 · 只读 · 可撤销）
 -- token_hash 为令牌的 sha256 哈希（与 sessions 一致），原始短码仅创建时返回一次；

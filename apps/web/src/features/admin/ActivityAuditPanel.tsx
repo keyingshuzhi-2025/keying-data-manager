@@ -37,7 +37,8 @@ function dayEndIso(date: string): string {
 
 function downloadCsv(filename: string, csv: string): void {
   // \uFEFF BOM：让 Excel 以 UTF-8 正确识别中文
-  const blob = new Blob([csv.startsWith('\uFEFF') ? csv : `\uFEFF${csv}`], {
+  const content = csv || '';
+  const blob = new Blob([content.startsWith('\uFEFF') ? content : `\uFEFF${content}`], {
     type: 'text/csv;charset=utf-8;',
   });
   const url = URL.createObjectURL(blob);
@@ -123,8 +124,8 @@ export function ActivityAuditPanel() {
 
   return (
     <div className="activity-audit-panel">
-      <div className="user-management__toolbar">
-        <label className="search-field">
+      <div className="audit-filters">
+        <label className="search-field audit-filters__search">
           <Search size={16} />
           <input
             type="search"
@@ -134,65 +135,67 @@ export function ActivityAuditPanel() {
             aria-label="搜索活动记录"
           />
         </label>
-        <select
-          className="select-field"
-          value={userId}
-          onChange={(event) => { setUserId(event.target.value); setPage(1); }}
-          aria-label="按用户筛选"
-        >
-          <option value="">全部用户</option>
-          {users.data?.users.map((user) => (
-            <option key={user.id} value={user.id}>{user.username}</option>
-          ))}
-        </select>
-        <select
-          className="select-field"
-          value={action}
-          onChange={(event) => { setAction(event.target.value); setPage(1); }}
-          aria-label="按操作筛选"
-        >
-          <option value="">全部操作</option>
-          {ACTIVITY_ACTION_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-        <label className="field audit-filter-date">
-          <span>起始日期</span>
-          <input
-            type="date"
-            value={from}
-            max={to || undefined}
-            onChange={(event) => { setFrom(event.target.value); setPage(1); }}
-            aria-label="起始日期"
-          />
-        </label>
-        <label className="field audit-filter-date">
-          <span>结束日期</span>
-          <input
-            type="date"
-            value={to}
-            min={from || undefined}
-            onChange={(event) => { setTo(event.target.value); setPage(1); }}
-            aria-label="结束日期"
-          />
-        </label>
-        <button
-          className="button button--secondary"
-          type="button"
-          onClick={resetFilters}
-          title="清除所有筛选条件"
-        >
-          <RefreshCw size={16} /> 重置筛选
-        </button>
-        <button
-          className="button button--primary"
-          type="button"
-          onClick={() => void exportCsv()}
-          disabled={exporting}
-        >
-          {exporting ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}
-          {exporting ? '导出中…' : '导出 CSV'}
-        </button>
+        <div className="audit-filters__row">
+          <select
+            className="select-field"
+            value={userId}
+            onChange={(event) => { setUserId(event.target.value); setPage(1); }}
+            aria-label="按用户筛选"
+          >
+            <option value="">全部用户</option>
+            {users.data?.users.map((user) => (
+              <option key={user.id} value={user.id}>{user.username}</option>
+            ))}
+          </select>
+          <select
+            className="select-field"
+            value={action}
+            onChange={(event) => { setAction(event.target.value); setPage(1); }}
+            aria-label="按操作筛选"
+          >
+            <option value="">全部操作</option>
+            {ACTIVITY_ACTION_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <label className="field audit-filter-date">
+            <span>起始日期</span>
+            <input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(event) => { setFrom(event.target.value); setPage(1); }}
+              aria-label="起始日期"
+            />
+          </label>
+          <label className="field audit-filter-date">
+            <span>结束日期</span>
+            <input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(event) => { setTo(event.target.value); setPage(1); }}
+              aria-label="结束日期"
+            />
+          </label>
+          <button
+            className="button button--secondary"
+            type="button"
+            onClick={resetFilters}
+            title="清除所有筛选条件"
+          >
+            <RefreshCw size={16} /> 重置筛选
+          </button>
+          <button
+            className="button button--primary"
+            type="button"
+            onClick={() => void exportCsv()}
+            disabled={exporting}
+          >
+            {exporting ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}
+            {exporting ? '导出中…' : '导出 CSV'}
+          </button>
+        </div>
       </div>
 
       {logs.isError ? (

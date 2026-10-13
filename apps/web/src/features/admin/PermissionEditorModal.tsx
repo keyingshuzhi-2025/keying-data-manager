@@ -37,15 +37,20 @@ export function PermissionEditorModal({
     if (!dirty || saving) return;
     onSave(permissions);
   };
+  const applyPreset = (preset: 'all' | 'readonly' | 'none') => {
+    if (preset === 'all') setPermissions({ read: true, upload: true, edit: true });
+    if (preset === 'readonly') setPermissions({ read: true, upload: false, edit: false });
+    if (preset === 'none') setPermissions({ read: false, upload: false, edit: false });
+  };
 
   return (
     <Modal
       title={`权限设置 · ${user.username}`}
-      description="设置该账号的全局权限。下载、Markdown 编辑与分享由文件夹级 ACL 控制。"
+      description="设置该账号的默认权限（文件夹 ACL 未覆盖时生效）。下载、Markdown 编辑与分享由文件夹级 ACL 按目录控制。"
       onClose={onClose}
       size="medium"
     >
-      <form className="user-create-form" onSubmit={submit}>
+      <form className="user-create-form permission-editor" onSubmit={submit}>
         {toast ? <Toast message={toast} onDismiss={() => setToast(null)} /> : null}
         <div className="permission-note">
           <ShieldCheck size={18} />
@@ -53,6 +58,11 @@ export function PermissionEditorModal({
             <strong>当前权限摘要</strong>
             <span>{permissionSummaryText(permissions as unknown as PermissionSet) || '无'}</span>
           </div>
+        </div>
+        <div className="permission-presets" aria-label="常用权限预设">
+          <button className="button button--secondary button--sm" type="button" onClick={() => applyPreset('all')}>全开</button>
+          <button className="button button--secondary button--sm" type="button" onClick={() => applyPreset('readonly')}>只读</button>
+          <button className="button button--secondary button--sm" type="button" onClick={() => applyPreset('none')}>清空</button>
         </div>
         <fieldset className="create-permissions">
           <legend>全局权限</legend>

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
-import Database from 'better-sqlite3';
+import type { AppSqliteDatabase } from './db/node-sqlite.js';
 import mime from 'mime-types';
 import { conflict, notFound } from './errors.js';
 import type { LocalObjectStorage } from './storage.js';
@@ -245,7 +245,7 @@ function typeCondition(type: ListFilesQuery['type']): string | null {
 
 export class FileService {
   constructor(
-    private readonly db: Database.Database,
+    private readonly db: AppSqliteDatabase,
     private readonly storage: LocalObjectStorage,
   ) {}
 

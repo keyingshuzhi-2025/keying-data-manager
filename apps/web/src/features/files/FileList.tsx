@@ -6,6 +6,7 @@ import {
   FolderInput,
   Pencil,
   Share2,
+  ShieldCheck,
   Trash2,
 } from 'lucide-react';
 import { FileTypeIcon } from '../../components/FileTypeIcon';
@@ -18,6 +19,7 @@ interface FileListProps {
   canEdit: boolean;
   canDownload: boolean;
   canShare: boolean;
+  canManagePermissions: boolean;
   onOpen: (file: FileRecord) => void;
   onPreview: (file: FileRecord) => void;
   onRename: (file: FileRecord) => void;
@@ -25,6 +27,7 @@ interface FileListProps {
   onCopy: (file: FileRecord) => void;
   onDelete: (file: FileRecord) => void;
   onShare: (file: FileRecord) => void;
+  onManagePermissions: (file: FileRecord) => void;
 }
 
 interface ActionsProps extends Omit<FileListProps, 'files' | 'view' | 'onOpen'> {
@@ -36,12 +39,14 @@ function FileActions({
   canEdit,
   canDownload,
   canShare,
+  canManagePermissions,
   onPreview,
   onRename,
   onMove,
   onCopy,
   onDelete,
   onShare,
+  onManagePermissions,
 }: ActionsProps) {
   return (
     <div
@@ -49,6 +54,11 @@ function FileActions({
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
     >
+      {canManagePermissions ? (
+        <button type="button" onClick={() => onManagePermissions(file)} aria-label={`设置 ${file.name} 的权限`} title="设置权限">
+          <ShieldCheck size={17} />
+        </button>
+      ) : null}
       {file.kind === 'file' ? (
         <>
           <button type="button" onClick={() => onPreview(file)} aria-label={`预览 ${file.name}`} title="预览">

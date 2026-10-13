@@ -13,20 +13,29 @@ import {
 } from '../file-service.js';
 import type { LocalObjectStorage } from '../storage.js';
 import type { AuthenticatedRequest } from '../auth.js';
+import { requireUser } from '../auth.js';
 import {
+  resolveEffectivePermissions,
   requireFilePermission,
   requireFilePermissions,
   requireFolderPermission,
   requireRootPermission,
 } from '../authz.js';
 import { renderMarkdownPdf } from '../md-pdf.js';
-import { loadWatermarkConfig } from '../watermark-config.js';
+import { loadWatermarkConfig, watermarkStyleFromConfig } from '../watermark-config.js';
+import { applyPdfWatermark, maybeWatermarkPdf } from '../watermark-pdf.js';
 import { maybeWatermarkImage } from '../watermark-output.js';
 import { resolveWatermarkText } from '../watermark.js';
 import type { FileRecord, ListFilesQuery } from '../types.js';
 
 const idSchema = z.string().uuid();
 const optionalParentSchema = z.union([z.string().uuid(), z.null()]).optional();
+const effectivePermissionsQuerySchema = z.object({
+  folderId: z.union([z.literal('ROOT'), z.string().uuid()]).optional(),
+  fileId: z.string().uuid().optional(),
+}).refine((value) => !(value.folderId && value.fileId), {
+  message: '只能指定一个权限目标',
+});
 
 const listQuerySchema = z.object({
   parentId: z.string().uuid().optional(),
@@ -183,6 +192,18 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
       : requireRootPermission(context.db.sqlite, request, 'upload')
   );
 
+  // 当前用户读取自己的实际 ACL，不暴露管理端 ACL 编辑接口。
+  app.get('/api/permissions/effective', async (request) => {
+    const user = await requireUser(context.db.sqlite, request);
+    const input = parseOrThrow(effectivePermissionsQuerySchema, request.query, '权限查询参数无效');
+    const target = input.fileId
+      ? { kind: 'file' as const, id: input.fileId }
+      : input.folderId === undefined || input.folderId === 'ROOT'
+      ? { kind: 'root' as const }
+      : { kind: 'folder' as const, id: input.folderId };
+    return { permissions: resolveEffectivePermissions(context.db.sqlite, user, target) };
+  });
+
   app.get('/api/files', async (request) => {
     const query = parseOrThrow(listQuerySchema, request.query, '查询参数无效') as ListFilesQuery;
     if (query.parentId) {
@@ -324,19 +345,19 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     if (result.truncated) throw badRequest('文件过大，无法导出 PDF');
 
     const user = (request as AuthenticatedRequest).user;
-    // v0.1.2 §6.1：MD→PDF 身份水印使用管理员配置的模板与开关
+    // v0.1.2 §6.1：MD→PDF 身份水印使用管理员配置的模板与开关（平铺瓦片水印）
     const watermarkConfig = loadWatermarkConfig(context.db);
-    const watermark = watermarkConfig.enabled
-      ? resolveWatermarkText(watermarkConfig.text, {
-        kind: 'identity',
-        username: user?.username ?? '',
-        fileName: file.name,
-      })
-      : undefined;
-    const pdf = await renderMarkdownPdf(result.content, {
-      title: file.name,
-      watermark,
+    const watermarkLabel = resolveWatermarkText(watermarkConfig.text, {
+      kind: 'identity',
+      username: user?.username ?? '',
+      fileName: file.name,
     });
+    let pdf = await renderMarkdownPdf(result.content, {
+      title: file.name,
+    });
+    if (watermarkConfig.enabled) {
+      pdf = await applyPdfWatermark(pdf, watermarkLabel, watermarkStyleFromConfig(watermarkConfig));
+    }
 
     logFileActivity(request, context.db, {
       action: 'md_export',
@@ -443,15 +464,13 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     const file = context.files.get(fileIdFromParams(request));
     if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
     const user = (request as AuthenticatedRequest).user;
-    // v0.1.2 §6.2：图像下载叠加身份水印（服务端强约束）
-    const watermarked = await maybeWatermarkImage(
-      file,
-      context.storage,
-      loadWatermarkConfig(context.db),
-      { kind: 'identity', username: user?.username ?? '', shareCode: undefined, now: new Date() },
-      'download',
-    );
+    // v0.1.2 §6.2：图像 / 原生 PDF 下载叠加身份水印（服务端强约束）
+    const watermarkConfig = loadWatermarkConfig(context.db);
+    const watermarkContext = { kind: 'identity' as const, username: user?.username ?? '', shareCode: undefined, now: new Date() };
+    const watermarked = await maybeWatermarkImage(file, context.storage, watermarkConfig, watermarkContext, 'download');
     if (watermarked) return sendWatermarkedImage(reply, watermarked, file, true);
+    const watermarkedPdf = await maybeWatermarkPdf(file, context.storage, watermarkConfig, watermarkContext, 'download');
+    if (watermarkedPdf) return sendWatermarkedImage(reply, watermarkedPdf, file, true);
     logFileActivity(request, context.db, {
       action: 'download',
       targetType: 'file',
@@ -464,15 +483,13 @@ export function registerFileRoutes(app: FastifyInstance, context: RouteContext):
     const file = context.files.get(fileIdFromParams(request));
     if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
     const user = (request as AuthenticatedRequest).user;
-    // v0.1.2 §6.2：图像在线预览叠加身份水印
-    const watermarked = await maybeWatermarkImage(
-      file,
-      context.storage,
-      loadWatermarkConfig(context.db),
-      { kind: 'identity', username: user?.username ?? '', shareCode: undefined, now: new Date() },
-      'preview',
-    );
+    // v0.1.2 §6.2：图像 / 原生 PDF 在线预览叠加身份水印
+    const watermarkConfig = loadWatermarkConfig(context.db);
+    const watermarkContext = { kind: 'identity' as const, username: user?.username ?? '', shareCode: undefined, now: new Date() };
+    const watermarked = await maybeWatermarkImage(file, context.storage, watermarkConfig, watermarkContext, 'preview');
     if (watermarked) return sendWatermarkedImage(reply, watermarked, file, false);
+    const watermarkedPdf = await maybeWatermarkPdf(file, context.storage, watermarkConfig, watermarkContext, 'preview');
+    if (watermarkedPdf) return sendWatermarkedImage(reply, watermarkedPdf, file, false);
     return sendFile(file, request, reply, false, context.storage);
   });
 }

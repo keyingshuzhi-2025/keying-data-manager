@@ -38,8 +38,8 @@ describe('database migrations', () => {
       'can_upload',
       'can_edit',
     ]));
-    // v0.1.2：schema 迁移至 user_version 6，并新增 v6 专用表
-    expect(migrated.sqlite.pragma('user_version', { simple: true })).toBe(6);
+    // v0.1.2：schema 迁移至 user_version 8（条目 ACL + ROOT 默认策略）
+    expect(migrated.sqlite.pragma('user_version', { simple: true })).toBe(8);
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       'storage_quota_bytes',
     ]));

@@ -55,6 +55,52 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
       : trustProxy,
   });
 
+  // 必须在注册任何插件（尤其 @fastify/static）之前设置错误处理器：
+  // fastifyStatic 会覆盖其后注册的错误处理，导致 AppError 以默认 shape 返回，
+  // 前端无法从 body.error.code 识别 SHARE_PASSWORD_REQUIRED 等业务错误码。
+  app.setErrorHandler((error, request, reply) => {
+    request.log.debug(error);
+    if (error instanceof AppError) {
+      if (
+        error.code === 'TOO_MANY_REQUESTS'
+        && error.details !== undefined
+        && typeof error.details === 'object'
+      ) {
+        const retryAfter = (error.details as { retryAfterSeconds?: number }).retryAfterSeconds;
+        if (retryAfter !== undefined) reply.header('Retry-After', String(retryAfter));
+      }
+      reply.code(error.statusCode).send({
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.details === undefined ? {} : { details: error.details }),
+        },
+      });
+      return;
+    }
+    if (error instanceof ZodError) {
+      reply.code(400).send({
+        error: {
+          code: 'BAD_REQUEST',
+          message: '请求参数无效',
+          details: error.flatten(),
+        },
+      });
+      return;
+    }
+    if ((error as { code?: string; statusCode?: number }).code === 'FST_REQ_BODY_TOO_LARGE'
+      || (error as { code?: string; statusCode?: number }).statusCode === 413) {
+      reply.code(413).send({
+        error: { code: 'PAYLOAD_TOO_LARGE', message: '请求体超过大小限制' },
+      });
+      return;
+    }
+    request.log.error(error);
+    reply.code(500).send({
+      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' },
+    });
+  });
+
   await app.register(cookie);
   await app.register(multipart, {
     limits: {
@@ -133,49 +179,6 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
       return reply.type('text/html').sendFile('index.html', { cacheControl: false });
     });
   }
-
-  app.setErrorHandler((error, request, reply) => {
-    request.log.debug(error);
-    if (error instanceof AppError) {
-      if (
-        error.code === 'TOO_MANY_REQUESTS'
-        && error.details !== undefined
-        && typeof error.details === 'object'
-      ) {
-        const retryAfter = (error.details as { retryAfterSeconds?: number }).retryAfterSeconds;
-        if (retryAfter !== undefined) reply.header('Retry-After', String(retryAfter));
-      }
-      reply.code(error.statusCode).send({
-        error: {
-          code: error.code,
-          message: error.message,
-          ...(error.details === undefined ? {} : { details: error.details }),
-        },
-      });
-      return;
-    }
-    if (error instanceof ZodError) {
-      reply.code(400).send({
-        error: {
-          code: 'BAD_REQUEST',
-          message: '请求参数无效',
-          details: error.flatten(),
-        },
-      });
-      return;
-    }
-    if ((error as { code?: string; statusCode?: number }).code === 'FST_REQ_BODY_TOO_LARGE'
-      || (error as { code?: string; statusCode?: number }).statusCode === 413) {
-      reply.code(413).send({
-        error: { code: 'PAYLOAD_TOO_LARGE', message: '请求体超过大小限制' },
-      });
-      return;
-    }
-    request.log.error(error);
-    reply.code(500).send({
-      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' },
-    });
-  });
 
   app.addHook('onClose', async () => {
     db.close();

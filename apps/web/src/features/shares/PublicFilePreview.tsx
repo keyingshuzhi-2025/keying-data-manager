@@ -1,16 +1,17 @@
 import { Download, FileQuestion } from 'lucide-react';
-import { publicShareDownloadUrl, publicShareStreamUrl } from '../../api/client';
+import { publicShareDownloadUrl, publicShareExportPdfUrl, publicShareStreamUrl } from '../../api/client';
 import { FileTypeIcon } from '../../components/FileTypeIcon';
 import { Modal } from '../../components/Modal';
 import { fileTypeOf, formatBytes } from '../../utils/format';
-import { publicTargetUrl, toFileRecord } from './utils';
+import { isMarkdownMeta, publicTargetUrl, toFileRecord } from './utils';
 import type { ShareTreeNode } from '../../types';
 import './shares.css';
 
 /**
  * 匿名公开分享的单项预览（文件夹分享子树内的文件）。
  * 与站内 FilePreview 保持一致的外观（复用全局 preview-* 样式），
- * 数据源为公开接口 /api/public/shares/:token/stream|download（按相对路径定位）。
+ * 数据源为公开接口 /api/public/shares/:token/stream|download|export-pdf（按相对路径定位）。
+ * Markdown 直接渲染为带分享者溯源水印的 PDF；密码保护分享使用验证后设置的 HttpOnly Cookie。
  */
 export function PublicFilePreview({
   node,
@@ -22,7 +23,9 @@ export function PublicFilePreview({
   onClose: () => void;
 }) {
   const type = fileTypeOf(node);
+  const isMarkdown = isMarkdownMeta(node);
   const streamUrl = publicTargetUrl(publicShareStreamUrl(token), node);
+  const pdfUrl = publicTargetUrl(publicShareExportPdfUrl(token), node);
   const downloadUrl = publicTargetUrl(publicShareDownloadUrl(token), node);
 
   return (
@@ -35,7 +38,10 @@ export function PublicFilePreview({
           {type === 'document' && node.mimeType === 'application/pdf' ? (
             <iframe src={streamUrl} title={`${node.name} PDF 预览`} />
           ) : null}
-          {type === 'document' && node.mimeType?.startsWith('text/') ? (
+          {isMarkdown ? (
+            <iframe src={pdfUrl} title={`${node.name} PDF 预览`} />
+          ) : null}
+          {type === 'text' && !isMarkdown ? (
             <iframe className="text-preview" sandbox="" src={streamUrl} title={`${node.name} 文本预览`} />
           ) : null}
           {(type === 'other'

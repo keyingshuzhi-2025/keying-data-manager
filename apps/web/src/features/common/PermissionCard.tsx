@@ -50,7 +50,7 @@ export const PermissionCard = memo(function PermissionCard({
       type="button"
       className={`permission-card ${value ? 'is-on' : ''} ${disabled ? 'is-disabled' : ''}`}
       onClick={() => {
-        if (!disabled && clickable) onChange(value);
+        if (!disabled && clickable) onChange(!value);
       }}
       aria-pressed={value}
       aria-label={`${permission.title} ${value ? '已开启' : '已关闭'}`}

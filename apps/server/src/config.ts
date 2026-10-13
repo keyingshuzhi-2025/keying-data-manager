@@ -20,7 +20,7 @@ const environmentSchema = z.object({
   COOKIE_SECURE: z.string().optional(),
   TRUST_PROXY: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  LOG_FILE: z.string().min(1).optional(),
+  LOG_FILE: z.string().optional(),
   /** 登录/注册/改密/重置密码限流开关；生产默认开启，开发/测试默认关闭 */
   RATE_LIMIT_ENABLED: z.string().optional(),
   /** 限流窗口内允许的最大尝试次数 */
@@ -120,7 +120,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecure: parseBoolean(value.COOKIE_SECURE, isProduction),
     trustProxy: parseTrustProxy(value.TRUST_PROXY),
     logLevel: value.LOG_LEVEL,
-    logFile: value.LOG_FILE === undefined ? undefined : resolve(value.LOG_FILE),
+    // LOG_FILE 置空（''）表示强制输出到终端（开发模式），视为未配置
+    logFile: value.LOG_FILE && value.LOG_FILE.trim() !== '' ? resolve(value.LOG_FILE) : undefined,
     rateLimitEnabled: parseBoolean(value.RATE_LIMIT_ENABLED, isProduction),
     rateLimitMax: value.RATE_LIMIT_MAX,
     rateLimitWindowMs: value.RATE_LIMIT_WINDOW_MS,

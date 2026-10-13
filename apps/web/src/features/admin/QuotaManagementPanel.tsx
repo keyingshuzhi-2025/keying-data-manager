@@ -136,7 +136,7 @@ export function QuotaManagementPanel() {
 
   return (
     <div className="quota-panel">
-      <div className="user-management__toolbar">
+      <div className="quota-panel__bar">
         <span className="quota-panel__summary">
           <HardDrive size={16} />
           共 <strong>{summary.total}</strong> 个账号 · 已用合计 <strong>{formatBytes(summary.usedBytes)}</strong>
