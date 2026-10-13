@@ -13,6 +13,9 @@ import { FileService } from './file-service.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerFileRoutes } from './routes/files.js';
+import { registerPublicShareRoutes } from './routes/public.js';
+import { registerShareRoutes } from './routes/shares.js';
+import { RateLimiter } from './rate-limit.js';
 import { LocalObjectStorage } from './storage.js';
 
 export interface HubApp {
@@ -33,6 +36,11 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
   const db = new HubDatabase(config.dbPath);
   const storage = new LocalObjectStorage(config.objectDir, config.uploadDir);
   const files = new FileService(db.sqlite, storage);
+  const rateLimiter = new RateLimiter({
+    enabled: config.rateLimitEnabled,
+    max: config.rateLimitMax,
+    windowMs: config.rateLimitWindowMs,
+  });
   const trustProxy = config.trustProxy;
   const loggerOptions = config.logLevel === 'silent'
     ? false
@@ -45,6 +53,52 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
     trustProxy: typeof trustProxy === 'number'
       ? (_address, hop) => hop < trustProxy
       : trustProxy,
+  });
+
+  // 必须在注册任何插件（尤其 @fastify/static）之前设置错误处理器：
+  // fastifyStatic 会覆盖其后注册的错误处理，导致 AppError 以默认 shape 返回，
+  // 前端无法从 body.error.code 识别 SHARE_PASSWORD_REQUIRED 等业务错误码。
+  app.setErrorHandler((error, request, reply) => {
+    request.log.debug(error);
+    if (error instanceof AppError) {
+      if (
+        error.code === 'TOO_MANY_REQUESTS'
+        && error.details !== undefined
+        && typeof error.details === 'object'
+      ) {
+        const retryAfter = (error.details as { retryAfterSeconds?: number }).retryAfterSeconds;
+        if (retryAfter !== undefined) reply.header('Retry-After', String(retryAfter));
+      }
+      reply.code(error.statusCode).send({
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.details === undefined ? {} : { details: error.details }),
+        },
+      });
+      return;
+    }
+    if (error instanceof ZodError) {
+      reply.code(400).send({
+        error: {
+          code: 'BAD_REQUEST',
+          message: '请求参数无效',
+          details: error.flatten(),
+        },
+      });
+      return;
+    }
+    if ((error as { code?: string; statusCode?: number }).code === 'FST_REQ_BODY_TOO_LARGE'
+      || (error as { code?: string; statusCode?: number }).statusCode === 413) {
+      reply.code(413).send({
+        error: { code: 'PAYLOAD_TOO_LARGE', message: '请求体超过大小限制' },
+      });
+      return;
+    }
+    request.log.error(error);
+    reply.code(500).send({
+      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' },
+    });
   });
 
   await app.register(cookie);
@@ -64,16 +118,20 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
       .header('Referrer-Policy', 'no-referrer')
       .header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     if (config.nodeEnv === 'production') {
-      reply.header(
-        'Content-Security-Policy',
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",
-      );
+      reply
+        .header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+        .header(
+          'Content-Security-Policy',
+          "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'",
+        );
     }
   });
 
-  registerAuthRoutes(app, { config, db });
-  registerAdminRoutes(app, { db });
+  registerAuthRoutes(app, { config, db, rateLimiter });
+  registerAdminRoutes(app, { db, rateLimiter });
   registerFileRoutes(app, { config, db, storage, files });
+  registerShareRoutes(app, { config, db, files });
+  registerPublicShareRoutes(app, { db, storage });
 
   const [temporaryUploadsRemoved, orphanedObjectsRemoved] = await Promise.all([
     storage.cleanupTemporaryUploads(),
@@ -121,41 +179,6 @@ export async function buildApp(config: AppConfig = loadConfig()): Promise<HubApp
       return reply.type('text/html').sendFile('index.html', { cacheControl: false });
     });
   }
-
-  app.setErrorHandler((error, request, reply) => {
-    request.log.debug(error);
-    if (error instanceof AppError) {
-      reply.code(error.statusCode).send({
-        error: {
-          code: error.code,
-          message: error.message,
-          ...(error.details === undefined ? {} : { details: error.details }),
-        },
-      });
-      return;
-    }
-    if (error instanceof ZodError) {
-      reply.code(400).send({
-        error: {
-          code: 'BAD_REQUEST',
-          message: '请求参数无效',
-          details: error.flatten(),
-        },
-      });
-      return;
-    }
-    if ((error as { code?: string; statusCode?: number }).code === 'FST_REQ_BODY_TOO_LARGE'
-      || (error as { code?: string; statusCode?: number }).statusCode === 413) {
-      reply.code(413).send({
-        error: { code: 'PAYLOAD_TOO_LARGE', message: '请求体超过大小限制' },
-      });
-      return;
-    }
-    request.log.error(error);
-    reply.code(500).send({
-      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' },
-    });
-  });
 
   app.addHook('onClose', async () => {
     db.close();

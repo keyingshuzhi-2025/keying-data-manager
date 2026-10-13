@@ -1,0 +1,351 @@
+.permission-chain-viewer,
+.permission-chain-details {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.chain-viewer__controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(200px, 1.4fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 16px;
+  background: #f3f5f0;
+  border: 1px solid #dce4da;
+  border-radius: 14px;
+}
+
+.chain-viewer__field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.chain-viewer__field label {
+  color: #53615b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.chain-viewer__field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #31443a;
+  font-size: 0.78rem;
+  background: white;
+  border: 1px solid #d6ddd4;
+  border-radius: 10px;
+}
+
+.chain-viewer__field select:focus-visible {
+  outline: 2px solid #8ab39b;
+  outline-offset: 2px;
+}
+
+.chain-viewer__field--actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chain-viewer__field--actions .button {
+  min-height: 42px;
+}
+
+.chain-viewer__panel,
+.chain-details__effective,
+.chain-details__chain {
+  min-width: 0;
+  padding: 16px;
+  background: white;
+  border: 1px solid #e0e4dd;
+  border-radius: 14px;
+}
+
+.chain-viewer__heading,
+.permission-chain-details h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 13px;
+  color: #263b30;
+  font-size: 0.9rem;
+}
+
+.health-report {
+  display: grid;
+  gap: 12px;
+}
+
+.health-report__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: #617067;
+  font-size: 0.72rem;
+}
+
+.health-report__findings {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-report__finding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 8px;
+  padding: 10px 12px;
+  color: #594e39;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  background: #faf7ed;
+  border: 1px solid #eee2ba;
+  border-radius: 10px;
+}
+
+.health-report__finding--critical {
+  color: #8f3e35;
+  background: #fff3f0;
+  border-color: #f2d0c9;
+}
+
+.health-report__finding--info {
+  color: #416a50;
+  background: #f1f8f2;
+  border-color: #d7e8d8;
+}
+
+.health-report__severity {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.acl-list-table {
+  overflow: hidden;
+  border: 1px solid #e5e8e0;
+  border-radius: 11px;
+}
+
+.acl-list-table__header,
+.acl-list-table__row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr) minmax(150px, 1fr) 32px;
+  align-items: center;
+  gap: 12px;
+}
+
+.acl-list-table__header {
+  padding: 10px 12px;
+  color: #68766e;
+  font-size: 0.69rem;
+  font-weight: 700;
+  background: #f4f6f2;
+}
+
+.acl-list-table__row {
+  padding: 10px 12px;
+  font-size: 0.74rem;
+  border-top: 1px solid #edf0e9;
+}
+
+.acl-list-table__cell {
+  min-width: 0;
+}
+
+.acl-list-table__cell--name,
+.acl-list-table__cell--meta {
+  overflow-wrap: anywhere;
+}
+
+.acl-list-table__cell--meta {
+  color: #78867d;
+  font-size: 0.67rem;
+}
+
+.acl-list-table__name {
+  color: #2f4639;
+  font-weight: 700;
+}
+
+.acl-list-table__tag,
+.chain-details__tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 2px 7px;
+  color: #416a50;
+  background: #e7f2e9;
+  border-radius: 999px;
+  font-size: 0.61rem;
+}
+
+.acl-list-table__cell--perms .permission-grid,
+.chain-details__hop-body .permission-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.acl-list-table__cell--perms .permission-card,
+.chain-details__hop-body .permission-card {
+  min-height: 30px;
+  padding: 5px 7px;
+  gap: 4px;
+}
+
+.acl-list-table__cell--perms .permission-card__icon,
+.acl-list-table__cell--perms .permission-card__text small,
+.chain-details__hop-body .permission-card__icon,
+.chain-details__hop-body .permission-card__text small {
+  display: none;
+}
+
+.acl-list-table__cell--perms .permission-card__text strong,
+.chain-details__hop-body .permission-card__text strong {
+  font-size: 0.62rem;
+}
+
+.acl-list-table__cell--perms .permission-card__state,
+.chain-details__hop-body .permission-card__state {
+  font-size: 0.6rem;
+}
+
+.acl-list-table__expand {
+  justify-self: end;
+}
+
+.acl-list-table .surface-state--empty {
+  min-height: 100px;
+}
+
+.acl-list-table__footer {
+  padding: 9px 12px;
+  color: #728078;
+  font-size: 0.68rem;
+  border-top: 1px solid #edf0e9;
+}
+
+.chain-details__effective {
+  display: grid;
+  gap: 8px;
+}
+
+.chain-details__effective-source,
+.chain-details__configured-source {
+  color: #68766e;
+  font-size: 0.7rem;
+}
+
+.chain-details__hop {
+  border: 1px solid #e4e9e2;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.chain-details__hop + .chain-details__hop {
+  margin-top: 8px;
+}
+
+.chain-details__hop.is-effective {
+  border-color: #a9cdb3;
+}
+
+.chain-details__hop-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  color: #384d40;
+  background: #f7f9f5;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chain-details__jump {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  color: #4d7258;
+  background: #e6f1e8;
+  border-radius: 50%;
+  font-size: 0.67rem;
+  font-weight: 800;
+}
+
+.chain-details__name {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.chain-details__parent,
+.chain-details__inher,
+.chain-details__flag {
+  color: #6f7e73;
+  font-size: 0.65rem;
+}
+
+.chain-details__flag {
+  margin-left: auto;
+  color: #36744b;
+  font-weight: 700;
+}
+
+.chain-details__hop-body {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid #e5ebe4;
+}
+
+@media (max-width: 840px) {
+  .chain-viewer__controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .chain-viewer__field--actions {
+    grid-column: 1 / -1;
+  }
+
+  .acl-list-table__header {
+    display: none;
+  }
+
+  .acl-list-table__row {
+    grid-template-columns: 1fr 32px;
+  }
+
+  .acl-list-table__cell--perms,
+  .acl-list-table__cell--meta {
+    grid-column: 1;
+  }
+
+  .acl-list-table__expand {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 560px) {
+  .chain-viewer__controls {
+    grid-template-columns: 1fr;
+  }
+
+  .chain-viewer__field--actions {
+    grid-column: 1;
+  }
+
+  .chain-details__effective .permission-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

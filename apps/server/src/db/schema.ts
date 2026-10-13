@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   can_read INTEGER NOT NULL DEFAULT 0,
   can_upload INTEGER NOT NULL DEFAULT 0,
   can_edit INTEGER NOT NULL DEFAULT 0,
+  can_manage_permissions INTEGER NOT NULL DEFAULT 0,
   storage_quota_bytes INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   last_login_at TEXT
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS files (
   extension TEXT,
   size_bytes INTEGER,
   sha256 TEXT,
+  is_shared INTEGER NOT NULL DEFAULT 0,
   uploaded_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -92,4 +94,71 @@ CREATE INDEX IF NOT EXISTS idx_activity_user_time
 
 CREATE INDEX IF NOT EXISTS idx_activity_time
   ON activity_logs(created_at DESC);
+
+-- v6：文件夹级继承权限。folder_id 指向 files.id，但 'ROOT' 是虚拟默认策略
+-- （不指向任何 files 行），因此本表不设外键，由应用层保证 folder_id 有效。
+CREATE TABLE IF NOT EXISTS folder_permissions (
+  folder_id TEXT PRIMARY KEY,
+  can_read INTEGER NOT NULL DEFAULT 0,
+  can_download INTEGER NOT NULL DEFAULT 0,
+  can_upload INTEGER NOT NULL DEFAULT 0,
+  can_edit INTEGER NOT NULL DEFAULT 0,
+  can_edit_md INTEGER NOT NULL DEFAULT 0,
+  can_share INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL
+);
+
+-- v8：管理员对指定员工和具体文件/文件夹设置六维权限。
+CREATE TABLE IF NOT EXISTS item_permissions (
+  item_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  can_read INTEGER NOT NULL DEFAULT 0,
+  can_download INTEGER NOT NULL DEFAULT 0,
+  can_upload INTEGER NOT NULL DEFAULT 0,
+  can_edit INTEGER NOT NULL DEFAULT 0,
+  can_edit_md INTEGER NOT NULL DEFAULT 0,
+  can_share INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (item_id, user_id),
+  FOREIGN KEY (item_id) REFERENCES files(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_item_permissions_user ON item_permissions(user_id);
+
+-- v6：公开分享链接（匿名 · 限时 · 只读 · 可撤销）
+-- token_hash 为令牌的 sha256 哈希（与 sessions 一致），原始短码仅创建时返回一次；
+-- 由旧版明文 token 列迁移/回填而来（见 database.ts migrateShares）。
+CREATE TABLE IF NOT EXISTS shares (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  file_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('file', 'folder')),
+  created_by TEXT NOT NULL,
+  expires_at TEXT,
+  max_accesses INTEGER,
+  access_count INTEGER NOT NULL DEFAULT 0,
+  password_hash TEXT,
+  is_revoked INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  last_access_at TEXT,
+  FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_shares_file
+  ON shares(file_id);
+
+CREATE INDEX IF NOT EXISTS idx_shares_created_by
+  ON shares(created_by);
+
+-- v6：站点级键值配置（如动态水印参数）
+CREATE TABLE IF NOT EXISTS app_config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+);
 `;

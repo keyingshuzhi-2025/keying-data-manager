@@ -1,10 +1,14 @@
 import { memo, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Activity,
+  Droplets,
   Eye,
+  Gauge,
   Gift,
   KeyRound,
   LoaderCircle,
+  Pencil,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -25,6 +29,12 @@ import type {
 } from '../../types';
 import { errorMessage, formatBytes, formatDate } from '../../utils/format';
 import { InvitesPanel } from './InvitesPanel';
+import { ActivityAuditPanel } from './ActivityAuditPanel';
+import { QuotaManagementPanel } from './QuotaManagementPanel';
+import { WatermarkConfigPanel } from './WatermarkConfigPanel';
+import { PermissionGrid, PERMISSION_DEFINITIONS, permissionSummaryText, type PermissionDefinition } from '../common/PermissionCard';
+import { PermissionEditorModal } from './PermissionEditorModal';
+import type { PermissionSet } from '../../types';
 
 interface UserManagementDialogProps {
   currentUser: AuthUser;
@@ -37,21 +47,18 @@ interface UserPermissionRowProps {
   selected: boolean;
   onToggleSelect: (id: string) => void;
   saving: boolean;
-  onSave: (id: string, update: { isEnabled: boolean; permissions: AuthUser['permissions'] }) => void;
+  onSave: (id: string, update: { isEnabled: boolean; canManagePermissions: boolean; permissions: AuthUser['permissions'] }) => void;
   onReset: (user: AuthUser) => void;
   onDelete: (user: AuthUser) => void;
   onViewDetails: (user: AuthUser) => void;
 }
 
-const permissionLabels: Array<{
-  key: keyof AuthUser['permissions'];
-  title: string;
-  description: string;
-}> = [
-  { key: 'read', title: '读取与下载', description: '浏览、预览，并下载文件到本地' },
-  { key: 'upload', title: '上传与创建', description: '上传文件、新建文件夹' },
-  { key: 'edit', title: '编辑与删除', description: '重命名、移动、复制和删除' },
-];
+const permissionLabels = PERMISSION_DEFINITIONS.filter(
+  (d: PermissionDefinition) => ['read', 'upload', 'edit'].includes(d.key),
+);
+
+/** 下载 / Markdown 编辑 / 分享由文件和文件夹条目 ACL 控制；账号权限仅作为默认权限使用。 */
+const aclNote = '文件和文件夹的访问权限可按员工单独配置；账号权限作为未单独授权时的默认权限。';
 
 const UserPermissionRow = memo(function UserPermissionRow({
   user,
@@ -63,23 +70,23 @@ const UserPermissionRow = memo(function UserPermissionRow({
   onReset,
   onDelete,
   onViewDetails,
-}: UserPermissionRowProps) {
+  onEditPermissions,
+}: UserPermissionRowProps & { onEditPermissions: (user: AuthUser) => void }) {
   const [isEnabled, setIsEnabled] = useState(user.isEnabled);
-  const [permissions, setPermissions] = useState(user.permissions);
+  const [canManagePermissions, setCanManagePermissions] = useState(user.canManagePermissions);
 
   useEffect(() => {
     setIsEnabled(user.isEnabled);
-    setPermissions(user.permissions);
-  }, [user]);
+    setCanManagePermissions(user.canManagePermissions);
+  }, [user.isEnabled, user.canManagePermissions]);
 
   const isAdmin = user.role === 'admin';
   const isSelf = user.id === currentUser.id;
-  const dirty = isEnabled !== user.isEnabled
-    || permissionLabels.some(({ key }) => permissions[key] !== user.permissions[key]);
+  const dirty = isEnabled !== user.isEnabled || canManagePermissions !== user.canManagePermissions;
   const selectable = !isAdmin && !isSelf;
 
   return (
-    <article className={`user-access-row ${!isEnabled ? 'is-disabled' : ''}`}>
+    <article className={`user-access-row ${!isEnabled ? 'is-disabled' : ''} ${selected ? 'is-selected' : ''}`}>
       <header className="user-access-row__identity">
         {selectable ? (
           <label className="user-select-check" title={selected ? '取消选择' : '选择此用户'}>
@@ -97,11 +104,15 @@ const UserPermissionRow = memo(function UserPermissionRow({
         <div>
           <strong>{user.username}{isSelf ? '（你）' : ''}</strong>
           <span>
-            {isAdmin
-              ? '管理员 · 始终拥有全部权限'
-              : (user.lastLoginAt
-                ? `上次登录 ${formatDate(user.lastLoginAt)}`
-                : `尚未登录 · 注册于 ${formatDate(user.createdAt)}`)}
+            {user.lastLoginAt ? `上次登录 ${formatDate(user.lastLoginAt)}` : `注册于 ${formatDate(user.createdAt)}`}
+          </span>
+        </div>
+        <div className="user-access-row__status">
+          <span className={`status-pill ${isAdmin ? 'status-pill--admin' : 'status-pill--user'}`}>
+            {isAdmin ? '管理员' : '普通用户'}
+          </span>
+          <span className={`status-pill ${isEnabled ? 'status-pill--enabled' : 'status-pill--disabled'}`}>
+            {isEnabled ? '启用' : '停用'}
           </span>
         </div>
         <label className="account-toggle">
@@ -115,30 +126,42 @@ const UserPermissionRow = memo(function UserPermissionRow({
         </label>
       </header>
 
-      <div className="permission-options">
-        {permissionLabels.map(({ key, title, description }) => (
-          <label className="permission-option" key={key}>
-            <input
-              type="checkbox"
-              checked={permissions[key]}
-              onChange={(event) => setPermissions((current) => {
-                if (key === 'read' && !event.target.checked) {
-                  return { read: false, upload: false, edit: false };
-                }
-                return {
-                  ...current,
-                  read: key === 'read' ? event.target.checked : (event.target.checked || current.read),
-                  [key]: event.target.checked,
-                };
-              })}
-              disabled={isAdmin || !isEnabled || saving}
-            />
-            <span><strong>{title}</strong><small>{description}</small></span>
-          </label>
-        ))}
+      <div className="user-access-row__perms">
+        <span className="user-access-row__perms-label">权限</span>
+        <div className="user-access-row__perms-summary">
+          {permissionLabels.map(({ key, title }) => (
+            <span key={key} className={`perm-chip ${user.permissions[key] ? 'is-on' : ''}`} title={`${title}：${user.permissions[key] ? '已开启' : '已关闭'}`}>
+              <span>{title}</span>
+              <small>{user.permissions[key] ? '开' : '关'}</small>
+            </span>
+          ))}
+        </div>
+        <button
+          className="button button--secondary button--sm"
+          type="button"
+          onClick={() => onEditPermissions(user)}
+          disabled={saving}
+        >
+          <Pencil size={14} /> 编辑权限
+        </button>
       </div>
 
+      {!isAdmin ? (
+        <label className="account-toggle user-permission-manager-toggle">
+          <input
+            type="checkbox"
+            checked={canManagePermissions}
+            onChange={(event) => setCanManagePermissions(event.target.checked)}
+            disabled={saving}
+          />
+          <span>允许管理文件和文件夹权限</span>
+        </label>
+      ) : null}
+
       <footer className="user-access-row__footer">
+        <span className="user-access-row__hint">
+          {isAdmin ? '管理员始终拥有全部权限' : (!isEnabled ? '停用后，该用户的已登录会话会立即失效。' : aclNote)}
+        </span>
         <div className="user-access-row__actions">
           <button
             className="icon-button"
@@ -176,17 +199,12 @@ const UserPermissionRow = memo(function UserPermissionRow({
           ) : null}
         </div>
         <div className="user-access-row__save">
-          {!isAdmin && !isEnabled ? (
-            <span>停用后，该用户的已登录会话会立即失效。</span>
-          ) : (
-            <span />
-          )}
           {!isAdmin ? (
             <button
               className="button button--primary"
               type="button"
               disabled={!dirty || saving}
-              onClick={() => onSave(user.id, { isEnabled, permissions })}
+              onClick={() => onSave(user.id, { isEnabled, canManagePermissions, permissions: user.permissions })}
             >
               {saving ? <LoaderCircle className="spin" size={17} /> : null}
               {saving ? '保存中…' : '保存设置'}
@@ -226,7 +244,7 @@ function CreateUserDialog({ onClose, onCreated }: {
   };
 
   return (
-    <Modal title="新建用户" description="为局域网成员开通账号并预设权限。" onClose={onClose} size="medium">
+    <Modal title="新建用户" description="为局域网成员开通账号并预设权限。账号权限作为默认权限；下载、Markdown 编辑与分享由文件夹级 ACL 按目录控制。" onClose={onClose} size="medium">
       <form className="user-create-form" onSubmit={submit}>
         {create.isError ? (
           <div className="notice notice--error" role="alert">{errorMessage(create.error)}</div>
@@ -268,25 +286,12 @@ function CreateUserDialog({ onClose, onCreated }: {
         </label>
         <fieldset className="create-permissions">
           <legend>初始权限</legend>
-          {permissionLabels.map(({ key, title, description }) => (
-            <label className="permission-option" key={key}>
-              <input
-                type="checkbox"
-                checked={permissions[key]}
-                onChange={(event) => setPermissions((current) => {
-                  if (key === 'read' && !event.target.checked) {
-                    return { read: false, upload: false, edit: false };
-                  }
-                  return {
-                    ...current,
-                    read: key === 'read' ? event.target.checked : (event.target.checked || current.read),
-                    [key]: event.target.checked,
-                  };
-                })}
-              />
-              <span><strong>{title}</strong><small>{description}</small></span>
-            </label>
-          ))}
+          <PermissionGrid
+            permissions={permissions as PermissionSet}
+            onChange={(next: AuthUser['permissions']) => setPermissions(next)}
+            permissionsDef={permissionLabels}
+          />
+          <small className="field-hint">{aclNote}</small>
         </fieldset>
         <div className="user-create-form__footer">
           <button className="button button--secondary" type="button" onClick={onClose}>取消</button>
@@ -522,13 +527,13 @@ function UserDetailsDialog({ user, currentUser, onClose }: {
 // ----- 主对话框 -----
 export function UserManagementDialog({ currentUser, onClose }: UserManagementDialogProps) {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'users' | 'invites'>('users');
+  const [tab, setTab] = useState<'users' | 'invites' | 'audit' | 'quota' | 'watermark'>('users');
   const users = useQuery({
     queryKey: ['admin-users'],
     queryFn: api.listUsers,
   });
   const updateAccess = useMutation({
-    mutationFn: ({ id, update }: { id: string; update: { isEnabled: boolean; permissions: AuthUser['permissions'] } }) =>
+    mutationFn: ({ id, update }: { id: string; update: { isEnabled: boolean; canManagePermissions: boolean; permissions: AuthUser['permissions'] } }) =>
       api.updateUserAccess(id, update),
     onSuccess: ({ user }) => {
       queryClient.setQueryData<{ users: AuthUser[] }>(['admin-users'], (current) => ({
@@ -554,6 +559,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
   const [deleteTarget, setDeleteTarget] = useState<AuthUser | null>(null);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [detailsTarget, setDetailsTarget] = useState<AuthUser | null>(null);
+  const [permsTarget, setPermsTarget] = useState<AuthUser | null>(null);
 
   const filteredUsers = useMemo(() => {
     if (!users.data) return [] as AuthUser[];
@@ -607,6 +613,8 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
       total: list.length,
       enabled: list.filter((u) => u.isEnabled).length,
       disabled: list.filter((u) => !u.isEnabled).length,
+      admins: list.filter((u) => u.role === 'admin').length,
+      regular: list.filter((u) => u.role !== 'admin').length,
     };
   }, [users.data]);
 
@@ -614,9 +622,9 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
     <>
       <Modal
         title="用户与权限"
-        description="管理账号、权限、角色与邀请链接。"
+        description="管理账号、角色、存储配额与水印配置。账号权限作为默认权限（文件夹 ACL 未覆盖时生效）；下载、Markdown 编辑与分享由文件夹级 ACL 按目录控制。管理员始终拥有全部权限。"
         onClose={onClose}
-        size="large"
+        size="xlarge"
       >
         <div className="user-management">
           <div className="user-management__tabs" role="tablist" aria-label="管理视图">
@@ -638,15 +646,67 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
             >
               <Gift size={16} /> 邀请链接
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'audit'}
+              className={tab === 'audit' ? 'is-active' : ''}
+              onClick={() => setTab('audit')}
+            >
+              <Activity size={16} /> 活动审计
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'quota'}
+              className={tab === 'quota' ? 'is-active' : ''}
+              onClick={() => setTab('quota')}
+            >
+              <Gauge size={16} /> 存储配额
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'watermark'}
+              className={tab === 'watermark' ? 'is-active' : ''}
+              onClick={() => setTab('watermark')}
+            >
+              <Droplets size={16} /> 水印设置
+            </button>
           </div>
 
           {tab === 'invites' ? (
             <InvitesPanel currentUser={currentUser} />
+          ) : tab === 'audit' ? (
+            <ActivityAuditPanel />
+          ) : tab === 'quota' ? (
+            <QuotaManagementPanel />
+          ) : tab === 'watermark' ? (
+            <WatermarkConfigPanel />
           ) : (
             <>
+              <div className="user-management__overview" aria-label="用户概览">
+                <div>
+                  <span>账号总数</span>
+                  <strong>{counters.total}</strong>
+                </div>
+                <div>
+                  <span>已启用</span>
+                  <strong>{counters.enabled}</strong>
+                </div>
+                <div>
+                  <span>已停用</span>
+                  <strong>{counters.disabled}</strong>
+                </div>
+                <div>
+                  <span>普通用户</span>
+                  <strong>{counters.regular}</strong>
+                </div>
+              </div>
+
               <div className="permission-note">
                 <UsersRound size={20} />
-                <div><strong>读取权限包含下载</strong><span>获得读取权限的用户可将文件下载到自己的设备；上传和编辑会自动开启读取权限。</span></div>
+                <div><strong>默认权限</strong><span>这里设置账号的读取、上传、编辑；下载、Markdown 编辑和对外分享由文件夹级 ACL 按目录控制（未覆盖时不生效）。管理员始终拥有全部权限。</span></div>
               </div>
 
               <div className="user-management__toolbar">
@@ -773,6 +833,7 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
                     onReset={(u) => setResetTarget(u)}
                     onDelete={(u) => setDeleteTarget(u)}
                     onViewDetails={(u) => setDetailsTarget(u)}
+                    onEditPermissions={(u) => setPermsTarget(u)}
                   />
                 ))}
               </div>
@@ -837,6 +898,18 @@ export function UserManagementDialog({ currentUser, onClose }: UserManagementDia
           onClose={() => {
             setDetailsTarget(null);
             void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+          }}
+        />
+      ) : null}
+      {permsTarget ? (
+        <PermissionEditorModal
+          user={permsTarget}
+          initialPermissions={permsTarget.permissions}
+          onClose={() => setPermsTarget(null)}
+          saving={updateAccess.isPending && updateAccess.variables?.id === permsTarget.id}
+          onSave={(permissions) => {
+            updateAccess.mutate({ id: permsTarget.id, update: { isEnabled: permsTarget.isEnabled, canManagePermissions: permsTarget.canManagePermissions, permissions } });
+            setPermsTarget(null);
           }}
         />
       ) : null}

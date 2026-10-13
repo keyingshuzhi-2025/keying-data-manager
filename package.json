@@ -1,24 +1,28 @@
 {
   "name": "local-file-hub",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "concurrently --kill-others -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "tsx watch apps/server/src/index.ts",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node scripts/build-server.mjs && node scripts/run-server.mjs",
+    "dev:server:watch": "node scripts/watch-server.mjs",
+    "dev:server:tsx": "scripts\\node22.cmd node_modules/tsx/dist/cli.mjs watch apps/server/src/index.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
+    "dev:web:direct": "node node_modules/vite/bin/vite.js --config apps/web/vite.config.ts --configLoader native",
     "build": "npm run build:server && npm run build:web",
     "build:server": "tsc -p apps/server/tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
-    "start": "node dist/apps/server/src/index.js",
+    "start": "scripts\\node22.cmd dist/apps/server/src/index.js",
+    "backup": "scripts\\node22.cmd node_modules/tsx/dist/cli.mjs scripts/backup.ts",
     "typecheck": "npm run typecheck:server && npm run typecheck:web",
     "typecheck:server": "tsc --noEmit -p apps/server/tsconfig.json",
     "typecheck:web": "tsc --noEmit -p apps/web/tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "scripts\\node22.cmd node_modules/vitest/vitest.mjs run",
+    "test:watch": "scripts\\node22.cmd node_modules/vitest/vitest.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
@@ -29,7 +33,9 @@
     "dotenv": "^16.4.7",
     "fastify": "^5.12.4",
     "lucide-react": "^1.45.0",
+    "markdown-it": "^15.0.2",
     "mime-types": "^2.1.35",
+    "pdf-lib": "^1.17.1",
     "pino": "^9.6.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

@@ -6,6 +6,7 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'PAYLOAD_TOO_LARGE'
   | 'UNSUPPORTED_MEDIA_TYPE'
+  | 'TOO_MANY_REQUESTS'
   | 'STORAGE_ERROR'
   | 'INTERNAL_ERROR';
 
@@ -47,6 +48,10 @@ export function payloadTooLarge(message = '文件超过大小限制'): AppError 
 
 export function unsupportedMediaType(message = '不支持的文件类型'): AppError {
   return new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', message);
+}
+
+export function tooManyRequests(retryAfterSeconds = 60, message = '请求过于频繁，请稍后再试'): AppError {
+  return new AppError(429, 'TOO_MANY_REQUESTS', message, { retryAfterSeconds });
 }
 
 export function storageError(message: string, details?: unknown): AppError {

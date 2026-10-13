@@ -26,6 +26,9 @@ const permissionLabels: Array<{
   { key: 'edit', title: '编辑' },
 ];
 
+/** 下载、Markdown 编辑与对外分享由文件夹级 ACL 控制，不在此处预设。 */
+const aclNote = '下载、Markdown 编辑与分享权限由文件夹级 ACL 控制。';
+
 const expiryOptions: Array<{ value: number | null; label: string }> = [
   { value: 1, label: '1 小时后过期' },
   { value: 24, label: '24 小时后过期' },
@@ -134,6 +137,7 @@ export function InvitesPanel({ currentUser }: InvitesPanelProps) {
               ))}
             </div>
           </fieldset>
+          <p className="user-details__note">{aclNote}</p>
           <label className="field invite-expiry">
             <span>有效期</span>
             <select

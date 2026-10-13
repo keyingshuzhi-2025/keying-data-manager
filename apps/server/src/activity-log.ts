@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type Database from 'better-sqlite3';
+import type { AppSqliteDatabase } from './db/node-sqlite.js';
 
 export type ActivityAction =
   | 'login'
@@ -23,9 +23,20 @@ export type ActivityAction =
   | 'invite_revoke'
   | 'session_revoke'
   | 'sessions_revoke'
-  | 'quota_change';
+  | 'quota_change'
+  | 'acl_change'
+  | 'permission_chain_view'
+  | 'md_edit'
+  | 'md_export'
+  | 'share_create'
+  | 'share_update'
+  | 'share_revoke'
+  | 'share_delete'
+  | 'share_access'
+  | 'share_download'
+  | 'watermark_config_change';
 
-export type ActivityTargetType = 'file' | 'folder' | 'user' | 'invite';
+export type ActivityTargetType = 'file' | 'folder' | 'user' | 'invite' | 'share' | 'config';
 
 export interface ActivityRecord {
   id: string;
@@ -50,6 +61,10 @@ export interface ActivityListParams {
   userId?: string;
   action?: string;
   q?: string;
+  /** 起始时间（ISO 字符串，含当天起始时刻）；筛选 created_at >= from */
+  from?: string;
+  /** 截止时间（ISO 字符串）；筛选 created_at <= to */
+  to?: string;
   page: number;
   limit: number;
 }
@@ -87,7 +102,7 @@ function mapActivityRow(row: {
 }
 
 /** 写入一条活动日志（不主动抛错，失败静默，避免影响主流程） */
-export function recordActivity(db: Database.Database, input: ActivityInput): void {
+export function recordActivity(db: AppSqliteDatabase, input: ActivityInput): void {
   try {
     db.prepare(
       `INSERT INTO activity_logs (id, user_id, action, target_type, target_name, detail, created_at)
@@ -107,7 +122,7 @@ export function recordActivity(db: Database.Database, input: ActivityInput): voi
 }
 
 export function listActivityForUser(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   userId: string,
   limit: number,
 ): ActivityRecord[] {
@@ -115,7 +130,7 @@ export function listActivityForUser(
 }
 
 export function listActivity(
-  db: Database.Database,
+  db: AppSqliteDatabase,
   params: ActivityListParams,
 ): ActivityListResult {
   const page = Math.max(1, params.page);
@@ -136,6 +151,14 @@ export function listActivity(
     const like = `%${escaped}%`;
     clauses.push(`(u.username LIKE ? ESCAPE '\\' OR al.target_name LIKE ? ESCAPE '\\' OR al.detail LIKE ? ESCAPE '\\' OR al.action LIKE ? ESCAPE '\\')`);
     values.push(like, like, like, like);
+  }
+  if (params.from) {
+    clauses.push('al.created_at >= ?');
+    values.push(params.from);
+  }
+  if (params.to) {
+    clauses.push('al.created_at <= ?');
+    values.push(params.to);
   }
 
   const from = 'FROM activity_logs al JOIN users u ON u.id = al.user_id';
@@ -193,4 +216,15 @@ export const ACTIVITY_LABELS: Record<ActivityAction, string> = {
   session_revoke: '强制下线会话',
   sessions_revoke: '强制下线全部会话',
   quota_change: '调整存储配额',
+  acl_change: '调整文件夹权限',
+  permission_chain_view: '查看权限链',
+  md_edit: '编辑 Markdown',
+  md_export: '导出 PDF',
+  share_create: '创建分享链接',
+  share_update: '更新分享链接',
+  share_revoke: '撤销分享链接',
+  share_delete: '删除分享链接',
+  share_access: '访问分享链接',
+  share_download: '下载分享文件',
+  watermark_config_change: '修改水印配置',
 };

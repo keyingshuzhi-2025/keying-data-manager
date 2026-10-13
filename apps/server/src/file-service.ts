@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
-import Database from 'better-sqlite3';
+import type { AppSqliteDatabase } from './db/node-sqlite.js';
 import mime from 'mime-types';
 import { conflict, notFound } from './errors.js';
 import type { LocalObjectStorage } from './storage.js';
@@ -8,6 +8,7 @@ import type {
   CreateFileInput,
   FileRecord,
   FileType,
+  FileTypeInput,
   ListFilesQuery,
   ListFilesResult,
 } from './types.js';
@@ -22,6 +23,7 @@ interface FileRow {
   extension: string | null;
   size_bytes: number | null;
   sha256: string | null;
+  is_shared: number;
   uploaded_by: string | null;
   created_at: string;
   updated_at: string;
@@ -50,6 +52,7 @@ function mapFile(row: FileRow): FileRecord {
     extension: row.extension,
     sizeBytes: row.size_bytes,
     sha256: row.sha256,
+    isShared: row.is_shared === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
@@ -89,19 +92,125 @@ export function normalizeMimeType(filename: string, claimedMimeType?: string): s
   return 'application/octet-stream';
 }
 
-export function classifyFileType(record: Pick<FileRecord, 'kind' | 'mimeType'>): FileType {
+// ---- v6：权威文件类型分类（扩展名优先，MIME 兜底；前端枚举与此保持一致） ----
+
+export const TEXT_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'md', 'markdown', 'txt', 'log', 'csv', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'conf',
+]);
+
+export const DOCUMENT_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt',
+]);
+
+export const IMAGE_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg',
+]);
+
+export const AUDIO_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac',
+]);
+
+export const VIDEO_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'mp4', 'webm', 'mov', 'mkv', 'avi', 'flv',
+]);
+
+/** 压缩包及其他允许上传但归为 other 的扩展名 */
+export const ARCHIVE_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  'zip', '7z', 'rar', 'tar', 'gz', 'tgz', 'xz', 'bz2', 'apk',
+]);
+
+/** 上传白名单默认值：六类文件 + 归档/其他 */
+export const DEFAULT_ALLOWED_UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set([
+  ...TEXT_FILE_EXTENSIONS,
+  ...DOCUMENT_FILE_EXTENSIONS,
+  ...IMAGE_FILE_EXTENSIONS,
+  ...AUDIO_FILE_EXTENSIONS,
+  ...VIDEO_FILE_EXTENSIONS,
+  ...ARCHIVE_FILE_EXTENSIONS,
+]);
+
+/** 上传黑名单默认值：可执行/脚本/HTML 等高风险类型（白名单命中也拒绝） */
+export const DEFAULT_BLOCKED_UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set([
+  'exe', 'bat', 'cmd', 'com', 'msi', 'scr', 'pif', 'gadget',
+  'sh', 'bash', 'zsh', 'ksh',
+  'html', 'htm', 'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx',
+  'ps1', 'psm1', 'vbs', 'vbe', 'jse', 'wsf',
+  'jar', 'class', 'py', 'pyc', 'php', 'phtml', 'pl', 'pm', 'rb',
+  'jsp', 'jspx', 'asp', 'aspx', 'cgi', 'hta', 'mhtml', 'mht',
+  'dll', 'so', 'dylib', 'sys', 'bin', 'reg', 'inf', 'iso', 'img',
+]);
+
+export interface ExtensionPolicy {
+  allowed?: ReadonlySet<string>;
+  blocked?: ReadonlySet<string>;
+}
+
+/** 规范化扩展名：小写、去前导点、拒绝路径分隔符与控制字符；非法输入返回 null */
+export function normalizeExtension(extension: string | null | undefined): string | null {
+  if (!extension) return null;
+  let value = extension.trim().toLowerCase();
+  while (value.startsWith('.')) value = value.slice(1);
+  if (!value || /[\\/\u0000-\u001f\u007f]/.test(value)) return null;
+  return value;
+}
+
+/** 扩展名及其最后一个点分段（如 'tar.gz' -> ['tar.gz', 'gz']），便于复合扩展名匹配 */
+function extensionCandidates(extension: string | null | undefined): string[] {
+  const normalized = normalizeExtension(extension);
+  if (!normalized) return [];
+  const dot = normalized.lastIndexOf('.');
+  if (dot <= 0 || dot === normalized.length - 1) return [normalized];
+  return [normalized, normalized.slice(dot + 1)];
+}
+
+/** 扩展名是否命中黑名单（可自定义策略，默认用内置黑白名单） */
+export function isBlockedUploadExtension(
+  extension: string | null | undefined,
+  policy: ExtensionPolicy = {},
+): boolean {
+  const blocked = policy.blocked ?? DEFAULT_BLOCKED_UPLOAD_EXTENSIONS;
+  return extensionCandidates(extension).some((candidate) => blocked.has(candidate));
+}
+
+/** 扩展名是否允许上传：黑名单优先拒绝，其次须命中白名单；无扩展名一律拒绝 */
+export function isAllowedUploadExtension(
+  extension: string | null | undefined,
+  policy: ExtensionPolicy = {},
+): boolean {
+  const allowed = policy.allowed ?? DEFAULT_ALLOWED_UPLOAD_EXTENSIONS;
+  const blocked = policy.blocked ?? DEFAULT_BLOCKED_UPLOAD_EXTENSIONS;
+  const candidates = extensionCandidates(extension);
+  if (candidates.length === 0) return false;
+  if (candidates.some((candidate) => blocked.has(candidate))) return false;
+  return candidates.some((candidate) => allowed.has(candidate));
+}
+
+/** 权威分类：已知扩展名优先；未知扩展名或无扩展名时按 MIME 兜底；仍无法识别为 other */
+export function classifyFileType(record: FileTypeInput): FileType {
   if (record.kind === 'folder') return 'folder';
-  const mimeType = (record.mimeType ?? '').toLowerCase();
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('audio/')) return 'audio';
-  if (mimeType.startsWith('video/')) return 'video';
+  const extension = normalizeExtension(record.extension);
+  if (extension) {
+    if (TEXT_FILE_EXTENSIONS.has(extension)) return 'text';
+    if (DOCUMENT_FILE_EXTENSIONS.has(extension)) return 'document';
+    if (IMAGE_FILE_EXTENSIONS.has(extension)) return 'image';
+    if (AUDIO_FILE_EXTENSIONS.has(extension)) return 'audio';
+    if (VIDEO_FILE_EXTENSIONS.has(extension)) return 'video';
+  }
+  return classifyByMimeType(record.mimeType);
+}
+
+function classifyByMimeType(mimeType: string | null | undefined): FileType {
+  const mime = (mimeType ?? '').toLowerCase();
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('text/')) return 'text';
+  if (mime === 'application/pdf') return 'document';
   if (
-    mimeType.startsWith('text/')
-    || mimeType === 'application/pdf'
-    || mimeType.includes('wordprocessingml')
-    || mimeType.includes('msword')
-    || mimeType.includes('excel')
-    || mimeType.includes('zip')
+    mime.includes('wordprocessingml')
+    || mime.includes('msword')
+    || mime.includes('excel')
+    || mime.includes('presentationml')
   ) {
     return 'document';
   }
@@ -116,6 +225,8 @@ function typeCondition(type: ListFilesQuery['type']): string | null {
   switch (type) {
     case 'folder':
       return "kind = 'folder'";
+    case 'text':
+      return "kind = 'file' AND mime_type LIKE 'text/%'";
     case 'image':
       return "kind = 'file' AND mime_type LIKE 'image/%'";
     case 'audio':
@@ -123,6 +234,7 @@ function typeCondition(type: ListFilesQuery['type']): string | null {
     case 'video':
       return "kind = 'file' AND mime_type LIKE 'video/%'";
     case 'document':
+      // 兼容历史行为：document 过滤同时覆盖文本（text 是 v6 起独立分类）
       return "kind = 'file' AND (mime_type LIKE 'text/%' OR mime_type = 'application/pdf' OR mime_type LIKE '%word%' OR mime_type LIKE '%excel%' OR mime_type LIKE '%zip%')";
     case 'other':
       return "kind = 'file' AND mime_type NOT LIKE 'image/%' AND mime_type NOT LIKE 'audio/%' AND mime_type NOT LIKE 'video/%' AND mime_type NOT LIKE 'text/%' AND mime_type <> 'application/pdf'";
@@ -133,7 +245,7 @@ function typeCondition(type: ListFilesQuery['type']): string | null {
 
 export class FileService {
   constructor(
-    private readonly db: Database.Database,
+    private readonly db: AppSqliteDatabase,
     private readonly storage: LocalObjectStorage,
   ) {}
 
@@ -270,6 +382,40 @@ export class FileService {
        WHERE uploaded_by = ? AND kind = 'file' AND deleted_at IS NULL`,
     ).get(userId) as { total: number };
     return row.total;
+  }
+
+  /**
+   * 读取文件文本内容（UTF-8 解码）。二进制文件返回空 content 并标记 isBinary；
+   * 内容超过 maxBytes 时截断并标记 truncated。
+   */
+  async readText(
+    id: string,
+    maxBytes: number,
+  ): Promise<{ content: string; encoding: string; isBinary: boolean; truncated: boolean; sizeBytes: number }> {
+    const file = this.get(id);
+    if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
+    const { data, truncated } = await this.storage.readBytes(file.objectId, maxBytes);
+    const isBinary = data.includes(0);
+    return {
+      content: isBinary ? '' : data.toString('utf8'),
+      encoding: 'utf8',
+      isBinary,
+      truncated,
+      sizeBytes: file.sizeBytes ?? data.length,
+    };
+  }
+
+  /** 覆盖文本/MD 文件内容（在线编辑），同步更新对象与元数据；返回更新后的记录。 */
+  async updateContent(id: string, content: string): Promise<FileRecord> {
+    const file = this.get(id);
+    if (file.kind !== 'file' || !file.objectId) throw notFound('文件内容');
+    const data = Buffer.from(content, 'utf8');
+    const { sizeBytes, sha256 } = await this.storage.writeObject(file.objectId, data);
+    const timestamp = nowIso();
+    this.db.prepare(
+      'UPDATE files SET size_bytes = ?, sha256 = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL',
+    ).run(sizeBytes, sha256, timestamp, id);
+    return this.get(id);
   }
 
   update(id: string, patch: FilePatch): FileRecord {

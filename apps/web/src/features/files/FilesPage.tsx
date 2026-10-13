@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   LogOut,
   RefreshCw,
+  ShieldCheck,
   UploadCloud,
   UserCog,
 } from 'lucide-react';
@@ -22,6 +23,9 @@ import { ApiError, api, uploadFile } from '../../api/client';
 import { Toast, type ToastMessage } from '../../components/Toast';
 import { ChangePasswordDialog } from '../auth/ChangePasswordDialog';
 import { UserManagementDialog } from '../admin/UserManagementDialog';
+import { PermissionChainViewer } from '../admin/PermissionChainViewer';
+import { ItemPermissionsDialog } from './ItemPermissionsDialog';
+import { ShareDialog } from '../shares/ShareDialog';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import type { AuthUser, FileRecord, FileType, SortField, SortOrder } from '../../types';
 import { errorMessage, formatBytes } from '../../utils/format';
@@ -77,10 +81,23 @@ export function FilesPage({
 }) {
   const queryClient = useQueryClient();
   const online = useOnlineStatus();
-  const canRead = user.permissions.read;
-  const canUpload = user.permissions.upload;
-  const canEdit = user.permissions.edit;
   const [folderId, setFolderId] = useState<string | null>(folderFromLocation);
+  const effectivePermissionsQuery = useQuery({
+    queryKey: ['effective-permissions', user.id, folderId ?? 'ROOT'],
+    queryFn: () => api.getEffectivePermissions(folderId ?? 'ROOT'),
+    enabled: online && user.role !== 'admin',
+  });
+  const effectivePermissions = user.role === 'admin'
+    ? { read: true, download: true, upload: true, edit: true, editMd: true, share: true }
+    : (effectivePermissionsQuery.data?.permissions ?? (online
+      ? { read: false, download: false, upload: false, edit: false, editMd: false, share: false }
+      : user.permissions));
+  const canRead = Boolean(effectivePermissions.read);
+  const canUpload = Boolean(effectivePermissions.upload);
+  const canEdit = Boolean(effectivePermissions.edit);
+  const canDownload = Boolean(effectivePermissions.download);
+  const canEditMd = Boolean(effectivePermissions.editMd);
+  const canShare = Boolean(effectivePermissions.share);
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search.trim());
   const [type, setType] = useState<FileType | ''>('');
@@ -95,6 +112,9 @@ export function FilesPage({
   const [isUploading, setIsUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [showUserManagement, setShowUserManagement] = useState(false);
+  const [permissionTarget, setPermissionTarget] = useState<FileRecord | null>(null);
+  const [showPermissionChain, setShowPermissionChain] = useState(false);
+  const [shareTarget, setShareTarget] = useState<FileRecord | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
 
   const showToast = useCallback((text: string, tone: ToastMessage['tone'] = 'success') => {
@@ -144,10 +164,14 @@ export function FilesPage({
   });
 
   useEffect(() => {
+    if (effectivePermissionsQuery.error instanceof ApiError
+      && (effectivePermissionsQuery.error.status === 401 || effectivePermissionsQuery.error.status === 403)) {
+      void queryClient.invalidateQueries({ queryKey: ['session'] });
+    }
     if (files.error instanceof ApiError && (files.error.status === 401 || files.error.status === 403)) {
       void queryClient.invalidateQueries({ queryKey: ['session'] });
     }
-  }, [files.error, queryClient]);
+  }, [effectivePermissionsQuery.error, files.error, queryClient]);
 
   const refresh = useCallback(async () => {
     await Promise.all([
@@ -328,9 +352,14 @@ export function FilesPage({
           <div className="topbar__spacer" />
           {!online ? <span className="offline-badge"><CloudOff size={15} />离线</span> : null}
           {user.role === 'admin' ? (
-            <button className="button button--secondary topbar-admin-button" type="button" onClick={() => setShowUserManagement(true)}>
-              <UserCog size={17} /><span>用户权限</span>
-            </button>
+            <>
+              <button className="button button--secondary topbar-admin-button" type="button" onClick={() => setShowPermissionChain(true)}>
+                <ShieldCheck size={17} /><span>权限链</span>
+              </button>
+              <button className="button button--secondary topbar-admin-button" type="button" onClick={() => setShowUserManagement(true)}>
+                <UserCog size={17} /><span>用户权限</span>
+              </button>
+            </>
           ) : null}
           <div className="user-chip"><span>{user.username.slice(0, 1).toUpperCase()}</span><div><strong>{user.username}</strong><small>{user.role === 'admin' ? '管理员' : '普通用户'}</small></div></div>
           <button className="icon-button" type="button" onClick={() => setShowChangePassword(true)} aria-label="修改密码" title="修改密码">
@@ -381,9 +410,23 @@ export function FilesPage({
           {!canRead ? (
             <section className="access-panel" aria-live="polite">
               <div className="access-panel__icon"><FolderLock size={30} /></div>
-              <span className="eyebrow">等待授权</span>
-              <h2>管理员尚未开通文件访问</h2>
-              <p>你的账号已创建成功。请联系管理员授予“读取与下载”权限，授权后此页会自动更新。</p>
+              {effectivePermissionsQuery.isPending && online ? (
+                <><span className="eyebrow">正在读取权限</span><p>正在确认当前目录的有效权限…</p></>
+              ) : effectivePermissionsQuery.isError && online ? (
+                <>
+                  <span className="eyebrow">权限读取失败</span>
+                  <p>{errorMessage(effectivePermissionsQuery.error)}</p>
+                  <button className="button button--secondary" type="button" onClick={() => void effectivePermissionsQuery.refetch()}>
+                    <RefreshCw size={16} />重试
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="eyebrow">等待授权</span>
+                  <h2>管理员尚未开通文件访问</h2>
+                  <p>你的账号已创建成功。请联系管理员授予“读取与下载”权限，授权后此页会自动更新。</p>
+                </>
+              )}
               <div className="access-panel__account"><span>当前账号</span><strong>{user.username}</strong></div>
             </section>
           ) : (
@@ -409,12 +452,17 @@ export function FilesPage({
                 files={currentItems}
                 view={view}
                 canEdit={canEdit}
+                canDownload={canDownload}
+                canShare={canShare}
+                canManagePermissions={user.canManagePermissions}
                 onOpen={openFile}
                 onPreview={setPreview}
                 onRename={openRename}
                 onMove={openMove}
                 onCopy={openCopy}
                 onDelete={openDelete}
+                onShare={setShareTarget}
+                onManagePermissions={setPermissionTarget}
               />
             ) : null}
           </section>
@@ -449,7 +497,10 @@ export function FilesPage({
           pending={transferFile.isPending}
         />
       ) : null}
-      {preview ? <FilePreview file={preview} onClose={() => setPreview(null)} /> : null}
+      {preview ? <FilePreview file={preview} onClose={() => setPreview(null)} canDownload={canDownload} canEditMd={canEditMd} canShare={canShare} canManagePermissions={user.canManagePermissions} canViewChain={user.role === 'admin'} userId={user.id} /> : null}
+      {shareTarget ? <ShareDialog file={shareTarget} onClose={() => setShareTarget(null)} /> : null}
+      {permissionTarget ? <ItemPermissionsDialog item={permissionTarget} canViewChain={user.role === 'admin'} onClose={() => setPermissionTarget(null)} /> : null}
+      {showPermissionChain ? <PermissionChainViewer onClose={() => setShowPermissionChain(false)} /> : null}
       {showUserManagement ? <UserManagementDialog currentUser={user} onClose={() => setShowUserManagement(false)} /> : null}
       {showChangePassword ? (
         <ChangePasswordDialog

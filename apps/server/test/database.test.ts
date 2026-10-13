@@ -38,7 +38,8 @@ describe('database migrations', () => {
       'can_upload',
       'can_edit',
     ]));
-    expect(migrated.sqlite.pragma('user_version', { simple: true })).toBe(5);
+    // v0.1.2：schema 迁移至 user_version 8（条目 ACL + ROOT 默认策略）
+    expect(migrated.sqlite.pragma('user_version', { simple: true })).toBe(8);
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       'storage_quota_bytes',
     ]));
@@ -49,6 +50,15 @@ describe('database migrations', () => {
     ]));
     const fileColumns = migrated.sqlite.pragma('table_info(files)') as Array<{ name: string }>;
     expect(fileColumns.map((column) => column.name)).toContain('uploaded_by');
+    expect(fileColumns.map((column) => column.name)).toContain('is_shared');
+    const tableNames = migrated.sqlite.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    ).all() as Array<{ name: string }>;
+    expect(tableNames.map((row) => row.name)).toEqual(expect.arrayContaining([
+      'folder_permissions',
+      'shares',
+      'app_config',
+    ]));
     expect(migrated.sqlite.prepare(
       'SELECT role, can_read FROM users WHERE id = ?',
     ).get('legacy')).toMatchObject({ role: 'user', can_read: 0 });

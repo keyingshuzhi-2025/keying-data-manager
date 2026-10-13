@@ -1,39 +1,40 @@
-# 局域网文件共享站（Local File Hub）
+# 文件共享站（Local File Hub）
 
-一个面向局域网的轻量文件共享平台。用户可以通过浏览器上传、浏览、搜索、预览、下载和管理文档、图片、音频、视频及其他普通文件，也可以将 Web 应用安装为 PWA。
+一个面向局域网、也可经 HTTPS 反向代理安全部署到公网的轻量文件共享平台。用户可以通过浏览器上传、浏览、搜索、预览、下载和管理文档、图片、音频、视频及其他普通文件，也可以将 Web 应用安装为 PWA。
 
-文件内容保存在服务器本地对象目录中，SQLite 只保存用户、会话、文件元数据、邀请码和活动日志，不保存文件 BLOB。项目不依赖云服务、对象存储、消息队列或外部 API。
+文件内容保存在服务器本地对象目录中，SQLite 只保存用户、会话、文件元数据、文件/文件夹权限、分享链接、站点配置、邀请码和活动日志，不保存文件 BLOB。项目不依赖云服务、对象存储、消息队列或外部 API。
 
-> **文档基线**：包版本 `0.1.1`，发布分支 `master`，基线提交为 `v0.1.1` 标签。版本和工作区状态见 [`VERSION.md`](VERSION.md)。
+> **版本基线**：当前项目版本已锁定为 `0.1.2`，包含文件与文件夹 ACL、公开分享、动态水印、安全加固与备份等能力。最近已发布版本为 `v0.1.1`；`0.1.2` 尚未创建发布标签或执行 npm 发布。版本状态见 [`VERSION.md`](VERSION.md)。
 
 ## 当前状态
 
-当前版本已经实现：
+当前 `0.1.2` 版本已经实现：
 
-- 注册、登录、会话管理和密码修改；
-- 管理员账号、普通用户、用户启用/停用和三类文件权限；
-- 用户创建、删除、批量启用/停用/删除、密码重置和角色变更；
-- 一次性邀请链接，注册时自动授予邀请中预设的权限；
+- 注册、登录、会话管理和密码修改；登录/注册/改密/重置密码限流（429）；
+- 管理员账号、普通用户、用户启用/停用和**文件/文件夹六维权限**（读取/下载/上传/编辑/MD 编辑/分享）；
+- 用户创建、删除、批量启用/停用/删除、密码重置、角色变更、**存储配额配置**；
+- 一次性邀请链接，注册时自动授予邀请中预设的权限；可关闭开放注册、仅邀请码注册；
+- **条目级继承权限（ACL）**：管理员可指定员工管理权限，并按员工为文件/文件夹单独设置六项权限；未单独设置时沿目录链继承，管理员全权绕过；
+- **公开分享链接**（匿名 · 限时 · 只读 · 可撤销）：时效档位、次数上限、访问密码、文件夹分享隔离；
+- **动态防泄密水印**：图像预览/下载叠加身份水印，分享输出叠加分享者+短码溯源水印，管理员可配置；
+- **MD 在线编辑与导出 PDF**：每页叠加身份水印（markdown-it + pdf-lib，无 puppeteer）；
 - 文件上传、目录浏览、搜索、筛选、排序、分页、预览、下载、重命名、移动、复制和删除；
-- 图片、音频、视频、PDF 和纯文本的浏览器预览；
+- **上传白名单**：可执行/脚本/HTML 等高风险扩展名 415 拒绝；
+- 图片、音频、视频、PDF 和纯文本的浏览器预览；图像预览/下载均走服务端水印；
 - HTTP Range 流式传输和 `206 Partial Content`；
-- SQLite 元数据、WAL、外键和 schema 迁移；
+- SQLite 元数据、WAL、外键和 schema 迁移（`user_version` 8）；
 - 本地对象存储、临时上传清理和孤立对象清理；
-- 用户活动日志，以及管理员查看单个用户最近活动的界面；
-- 非管理员上传配额校验；
+- **全局活动审计**（含 CSV 导出）与按用户活动日志；
+- **内置备份脚本** `npm run backup`（SQLite 在线一致性备份 + 对象归档，保留最近 7 份）；
 - 响应式 React 前端、TanStack Query 状态管理和生产环境 PWA Service Worker；
-- 后端单元测试、数据库迁移测试、配置测试和 API 集成测试。
+- 后端单元测试、数据库迁移测试、配置测试和 API 集成测试（Node 22 / Node 24 双环境全绿）。
 
 当前版本**尚未实现**：
 
 - 分片上传、断点续传和上传任务持久化；
 - 缩略图生成、音视频转码和媒体工作流；
-- 文件夹/文件级细粒度 ACL；
-- 公开分享链接和匿名访问；
 - 文件离线收藏和受保护文件缓存；
-- 管理员配置存储配额的界面或 API；
-- 内置数据库/对象存储备份脚本；
-- 全局操作审计页面（当前提供按用户查询的活动日志）。
+- 多人实时协同编辑（当前 MD 编辑为单用户会话编辑）。
 
 ## 核心目标
 
@@ -108,6 +109,10 @@ Browser / PWA
 ├── README.md
 ├── Dockerfile
 ├── docker-compose.yml
+├── scripts
+│   ├── backup.ts                # SQLite 在线备份 + 对象归档
+│   ├── dev-fetch-prebuilt.mjs   # 开发环境原生模块预编译包下载辅助
+│   └── dev-list-prebuilt.mjs    # 开发环境原生模块资产查询辅助
 ├── vitest.config.ts
 ├── apps
 │   ├── web
@@ -145,7 +150,7 @@ Browser / PWA
 
 ## 数据模型
 
-SQLite 只保存文件元数据，不保存文件内容。当前 schema 版本为 `user_version = 5`，启动时会对旧版本表执行增量迁移。
+SQLite 只保存文件元数据，不保存文件内容。当前 schema 版本为 `user_version = 8`（数据库结构版本，与项目版本 `0.1.2` 分开管理），启动时会对旧版本表执行增量迁移。v0.1.2 使用 `folder_permissions`（ROOT/兼容 ACL）、`item_permissions`（员工与具体文件/文件夹 ACL）、`shares`（公开分享）和 `app_config`（站点配置，如水印参数）。
 
 ### `users`
 
@@ -156,16 +161,17 @@ SQLite 只保存文件元数据，不保存文件内容。当前 schema 版本�
 | `password_hash` | `scrypt$salt$hash` 加盐密码哈希 |
 | `role` | `admin` 或 `user` |
 | `is_enabled` | 账号是否启用；停用后立即无法登录 |
-| `can_read` | 浏览、预览、流式播放和下载 |
-| `can_upload` | 上传文件和新建文件夹 |
-| `can_edit` | 重命名、移动、复制和删除 |
+| `can_read` | 遗留全局权限列；未命中文件夹 ACL 时作为 `read` 基线 |
+| `can_upload` | 遗留全局权限列；未命中文件夹 ACL 时作为 `upload` 基线 |
+| `can_edit` | 遗留全局权限列；未命中文件夹 ACL 时作为 `edit` 基线 |
+| `can_manage_permissions` | 管理员指定的条目权限管理能力 |
 | `storage_quota_bytes` | 非管理员上传配额，`0` 表示不限制 |
 | `created_at` | 创建时间 |
 | `last_login_at` | 最近登录时间 |
 
 首次启动时会根据 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 创建管理员。若同名管理员已经存在，启动逻辑会确保其角色启用并拥有全部权限，但不会用环境变量覆盖已有密码。管理员始终拥有全部文件权限，管理员账号的权限不能通过普通权限接口修改。
 
-普通用户注册后默认没有任何文件权限；管理员可以分别授予读取、上传和编辑权限。管理员界面在关闭读取权限时会同步关闭上传和编辑权限，以保持权限集合一致。
+普通用户注册后默认没有任何文件权限。v0.1.2 的生效权限是六维模型：`read`（浏览/预览）、`download`（下载/流式）、`upload`（上传/新建目录）、`edit`（重命名/移动/复制/删除）、`editMd`（在线编辑 Markdown）和 `share`（创建分享链接）。具体员工与文件/文件夹的单独授权优先生效；未单独授权时继承最近的上级条目 ACL，再回退到 ROOT 默认策略与账号基线。管理员界面在关闭读取权限时会同步关闭上传和编辑权限，以保持权限集合一致。
 
 ### `sessions`
 
@@ -194,6 +200,7 @@ SQLite 只保存文件元数据，不保存文件内容。当前 schema 版本�
 | `size_bytes` | INTEGER | 文件字节数；目录通常为 `0` |
 | `sha256` | TEXT | 完整文件 SHA-256 |
 | `uploaded_by` | TEXT | 上传用户 ID；复制文件当前不会重新归属上传者 |
+| `is_shared` | INTEGER | 是否曾创建分享链接（创建分享时置 1） |
 | `created_at` | TEXT | ISO-8601 创建时间 |
 | `updated_at` | TEXT | ISO-8601 更新时间 |
 | `deleted_at` | TEXT | 软删除时间；为空表示有效 |
@@ -222,6 +229,51 @@ SQLite 只保存文件元数据，不保存文件内容。当前 schema 版本�
 
 邀请码只能使用一次。邀请链接的格式为 `/register?invite=<code>`；邀请过期、停用或已使用后会拒绝注册。当前不会发送邮件或短信，管理员需要自行复制和分发链接。
 
+### `folder_permissions`
+
+| 字段 | 说明 |
+|---|---|
+| `folder_id` | 文件夹 ID；`ROOT` 表示可选的根目录默认策略 |
+| `can_read` / `can_download` / `can_upload` | 读取、下载、上传权限 |
+| `can_edit` / `can_edit_md` / `can_share` | 编辑、Markdown 编辑、分享权限 |
+| `updated_by` / `updated_at` | 最后修改者与时间 |
+
+ACL 沿目录链自近向远取最近显式策略；未配置时回退用户全局权限。管理员全权绕过 ACL。
+
+员工与具体文件/文件夹的单独授权保存在 `item_permissions`，优先于共享目录 ACL，并沿文件夹树继承。管理员可在用户管理中授予员工权限管理能力；获授权员工可从文件/文件夹卡片配置员工 ACL。
+
+### `item_permissions`
+
+| 字段 | 说明 |
+|---|---|
+| `item_id` / `user_id` | 文件或文件夹与被授权员工的组合键 |
+| 六项 `can_*` | 读取、下载、上传、编辑、Markdown 编辑、分享 |
+| `updated_by` / `updated_at` | 最后修改者与时间 |
+
+### `shares`
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 分享记录 ID |
+| `token_hash` | 分享令牌的 SHA-256，数据库不保存明文令牌 |
+| `file_id` / `kind` | 分享根文件或目录 |
+| `created_by` | 创建者 |
+| `expires_at` | 可选过期时间 |
+| `max_accesses` / `access_count` | 访问次数上限与已用次数 |
+| `password_hash` | 可选访问密码哈希 |
+| `is_revoked` | 是否撤销 |
+| `created_at` / `last_access_at` | 创建与最近访问时间 |
+
+公开端点每次访问都会校验“存在、未撤销、未过期、次数未用尽、密码正确”五要素；文件夹分享只允许访问根目录子树内文件。
+
+### `app_config`
+
+| 字段 | 说明 |
+|---|---|
+| `key` | 配置键；水印配置使用 `watermark_config` |
+| `value` | JSON 字符串 |
+| `updated_by` / `updated_at` | 修改者与时间 |
+
 ### `activity_logs`
 
 | 字段 | 说明 |
@@ -233,7 +285,7 @@ SQLite 只保存文件元数据，不保存文件内容。当前 schema 版本�
 | `detail` | 可选详情 |
 | `created_at` | 操作时间 |
 
-活动日志采用尽力写入，记录失败不会阻断主业务。管理员可以在用户详情中查看该用户最近 50 条活动；当前没有全局审计页面。
+活动日志采用尽力写入，记录失败不会阻断主业务。管理员可以在用户详情中查看该用户最近 50 条活动；v0.1.2 还提供全站活动审计页面，支持动作、用户、时间和关键词筛选，并可导出 CSV。
 
 ## 文件存储设计
 
@@ -322,15 +374,48 @@ PATCH  /api/admin/users/:id/role
 
 管理员可以：
 
-- 创建普通用户并设置启用状态和三类权限；
+- 创建普通用户并设置启用状态、遗留全局读取/上传/编辑权限和存储配额；六维生效权限通过文件夹 ACL 管理；
 - 启用/停用用户，停用会删除该用户的会话；
 - 删除普通用户，不能删除管理员或当前登录用户；
 - 重置普通用户密码并使该用户会话失效；
 - 查看用户详情、活跃会话数、全局文件统计和最近活动；
 - 批量启用、停用或删除普通用户；
-- 变更普通用户角色。提升为管理员会启用账号并授予全部权限；降级保留原有权限值；不能修改自己的角色，也不能删除最后一个管理员。
+- 变更普通用户角色。提升为管理员会启用账号并授予全部权限；降级保留原有权限值；不能修改自己的角色，也不能删除最后一个管理员；
+- 通过 `PATCH /api/admin/users/:id` 设置 `storage_quota_bytes`，超出配额的上传返回 `409 CONFLICT`。
 
-当前后端已有 `storage_quota_bytes` 字段并在上传时校验非管理员配额，但还没有提供设置配额的 API 或管理界面。
+### 文件和文件夹权限（ACL）
+
+以下 ACL 管理接口需要管理员或管理员指定的权限管理员身份：
+
+```text
+GET /api/permissions/acl-users
+GET /api/admin/permissions?itemId=<条目ID>&userId=<员工ID>
+PUT /api/admin/permissions
+```
+
+`PUT` 请求体使用 `itemId`、`userId`、`permissions`；指定 `inheritParent=true` 可清除此员工在当前条目上的规则并恢复继承。ROOT 是全局默认策略，不通过条目授权接口修改。
+
+### 活动审计
+
+以下接口需要管理员权限：
+
+```text
+GET /api/admin/activity
+GET /api/admin/activity/export
+```
+
+`GET /api/admin/activity` 支持 `userId`、`action`、`q`、`from`、`to`、`page`、`limit` 筛选；`export` 返回 UTF-8 CSV。审计动作覆盖登录、注册、上传、下载、MD 编辑/导出、权限变更、配额变更、分享创建/访问/下载/撤销和水印配置变更。
+
+### 水印配置
+
+以下接口需要管理员权限：
+
+```text
+GET /api/admin/watermark-config
+PUT /api/admin/watermark-config
+```
+
+配置写入 `app_config`，每次输出实时读取，变更无需重启。字段包括 `enabled`、`text`、`opacity`、`position`、`corner`、`margin`、`fontSize`、`color`、`angleDeg`、`tileWidth`、`tileHeight`、`tileSpacing`、`applyToPreview`、`applyToDownload`。
 
 ### 邀请接口
 
@@ -344,6 +429,34 @@ DELETE /api/admin/invites/:id
 
 创建邀请时可以设置读取、上传、编辑权限和可选的过期时间（1 小时至 365 天）。撤销邀请只会使邀请失效，不会删除已经通过邀请注册的用户。
 
+### 公开分享链接
+
+以下接口需要登录；创建分享还要求用户对目标文件/目录具备 `share` 权限，管理员全权绕过：
+
+```text
+POST   /api/share-links
+GET    /api/share-links
+GET    /api/share-links/:id
+PATCH  /api/share-links/:id
+POST   /api/share-links/:id/revoke
+DELETE /api/share-links/:id
+```
+
+创建请求包含 `fileId`、`expiresIn`（`1h` / `1d` / `3d` / `7d` / `30d` / `forever`）、可选 `maxAccesses` 和 `password`。服务端只返回一次原始令牌，数据库仅保存 SHA-256。
+
+公开端点无需登录：
+
+```text
+GET  /api/public/shares/:token/info
+GET  /api/public/shares/:token/tree
+GET  /api/public/shares/:token/files/:fileId/content
+POST /api/public/shares/:token/verify
+GET  /api/public/shares/:token/download
+GET  /api/public/shares/:token/stream
+```
+
+每次访问校验分享存在、未撤销、未过期、次数未用尽和密码正确；通过后自增 `access_count` 并写入 `share_access` / `share_download` 审计。文件夹分享严格限制在根目录子树内。
+
 ### 文件和目录接口
 
 ```text
@@ -355,13 +468,20 @@ PATCH  /api/files/:id
 POST   /api/files/:id/move
 POST   /api/files/:id/copy
 DELETE /api/files/:id
+GET    /api/files/:id/content
+GET    /api/files/:id/preview
+PUT    /api/files/:id/content
+GET    /api/files/:id/export-pdf
 ```
 
 权限要求：
 
-- 列表、详情、路径：`read`
+- 列表、详情、路径、内容、预览：`read`
 - 新建目录：`upload`
 - 重命名、移动、复制、删除：`edit`
+- 在线编辑 Markdown 内容：`editMd`（仅 `.md` / `.markdown`）
+- 创建分享链接：`share`
+- 下载、流式播放、导出 PDF：`read` + `download`
 
 `GET /api/files` 支持：
 
@@ -371,6 +491,8 @@ DELETE /api/files/:id
 - `sort`：`name`、`size`、`createdAt` 或 `updatedAt`；
 - `order`：`asc` 或 `desc`；
 - `page` / `limit`：分页，`limit` 最大 200，前端默认每页 100。
+
+`PUT /api/files/:id/content` 保存 Markdown 文本并记录 `md_edit` 审计；`GET /api/files/:id/export-pdf` 将 Markdown 渲染为带身份水印的 PDF 附件，使用 `markdown-it` + `pdf-lib`，不依赖 Chromium/puppeteer。
 
 ### 上传
 
@@ -384,7 +506,9 @@ POST /api/uploads
 - `parentId`：可选目标目录 UUID；
 - `name`：可选期望文件名；未提供时使用上传文件名。
 
-每个请求只能上传一个文件。后端根据扩展名优先确定 MIME 类型，客户端声明的 MIME 仅作为回退；无法识别类型或超过限制时会拒绝请求。上传完成后返回文件元数据。
+每个请求只能上传一个文件。后端根据扩展名优先确定 MIME 类型，客户端声明的 MIME 仅作为回退；无法识别类型、超过限制或命中禁用扩展名时会拒绝请求。上传完成后返回文件元数据。
+
+v0.1.2 默认启用上传白名单：`.exe`、`.bat`、`.cmd`、`.sh`、`.html`、`.js`、`.ps1` 等可执行、脚本和 HTML 类型返回 `415 UNSUPPORTED_MEDIA_TYPE`；文本、文档、图片、音频、视频和归档类型允许上传。
 
 当前不支持分片、断点续传或后台任务持久化。前端提供上传队列、进度显示和失败重试，重试会重新发起完整文件上传。
 
@@ -396,7 +520,7 @@ POST /api/uploads
 已使用字节数 = 该用户 uploaded_by 的未删除文件 size_bytes 总和
 ```
 
-`storage_quota_bytes = 0` 表示不限制；管理员不受配额限制。超出配额时返回 `409 CONFLICT`，并清理已经写入的临时对象。当前没有配额配置界面，测试通过数据库字段验证该逻辑。
+`storage_quota_bytes = 0` 表示不限制；管理员不受配额限制。超出配额时返回 `409 CONFLICT`，并清理已经写入的临时对象。管理员可通过 `PATCH /api/admin/users/:id` 设置配额，前端用户管理界面提供配额输入、已用空间和保存反馈。
 
 ### 下载和媒体流
 
@@ -405,14 +529,14 @@ GET /api/files/:id/download
 GET /api/files/:id/stream
 ```
 
-两个接口都要求读取权限并支持 `Range`：
+两个接口都要求 `read` + `download` 权限。非图像文件支持 `Range`：
 
 - 无 Range 时返回完整内容；
 - 有效 Range 返回 `206 Partial Content`、`Content-Range` 和对应 `Content-Length`；
 - 无效 Range 返回 `400` 或 `416`；
-- 响应包含 `Accept-Ranges: bytes`。
+- 响应包含 `Accept-Ranges`。
 
-`download` 强制以附件形式下载。`stream` 对安全内联类型使用 `inline`，支持：
+图像预览和下载由服务端叠加动态身份水印；水印版为完整 `200` 响应，不走原始字节 Range。`download` 强制以附件形式下载。`stream` 对安全内联类型使用 `inline`，支持：
 
 - 非 SVG 图片；
 - 音频；
@@ -454,12 +578,14 @@ PWA 用于安装应用和缓存应用壳，不表示默认离线保存文件内�
 
 - 文件 API 默认要求登录，健康检查接口除外。
 - 所有文件操作都在服务端校验会话和对应权限，前端隐藏按钮不是唯一防线。
-- 上传文件名禁止路径分隔符、控制字符、`.`、`..` 和过长名称。
+- 上传文件名禁止路径分隔符、控制字符、`.`、`..` 和过长名称；扩展名白名单优先于客户端 MIME。
 - 后端自行拼接对象路径，不接受客户端提供的服务器绝对路径。
 - MIME 类型优先根据扩展名判断，客户端声明类型只作为回退。
 - 下载和流式接口只接受数据库中的文件 ID。
 - 会话令牌只保存哈希值；Cookie 使用 `HttpOnly`、`SameSite=Strict`。
-- 生产环境默认启用安全 Cookie 和 CSP；可配置 `TRUST_PROXY` 处理反向代理。
+- 生产环境默认启用安全 Cookie、CSP 和 HSTS；基础安全响应头（`X-Frame-Options: SAMEORIGIN`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Permissions-Policy`）在所有环境启用。可通过 `TRUST_PROXY` 处理反向代理。
+- 登录、注册、修改密码和重置密码按 IP/用户名限流，超限返回 `429 TOO_MANY_REQUESTS` 并设置 `Retry-After`。
+- `REGISTRATION_ENABLED=false` 时仅允许管理员分发的邀请码注册。
 - 单文件大小、multipart 文件数量、字段大小和请求体大小均有限制。
 - SQLite 启用外键、WAL、`synchronous=NORMAL` 和 `busy_timeout=5000`。
 - 文件写入和元数据写入采用“先落盘、后提交”的恢复策略；启动时清理临时文件和孤立对象。
@@ -480,7 +606,7 @@ PWA 用于安装应用和缓存应用壳，不表示默认离线保存文件内�
 | `OBJECT_DIR` | `${DATA_DIR}/objects` | 文件内容目录 |
 | `UPLOAD_DIR` | `${DATA_DIR}/uploads` | 未完成上传临时目录 |
 | `WEB_DIST_DIR` | `dist/web` | 生产前端构建目录 |
-| `PUBLIC_URL` | 未设置 | 当前保留配置，现有代码未用于生成 URL |
+| `PUBLIC_URL` | 未设置 | 公开分享链接的外部访问 URL；未设置时 API 返回相对路径 `/s/<token>` |
 | `ADMIN_USERNAME` | `admin`（仅开发） | 首次启动的管理员账号；生产环境必须显式设置 |
 | `ADMIN_PASSWORD` | `admin123`（仅开发） | 首次启动的管理员密码；生产环境至少 12 字节 |
 | `MAX_UPLOAD_BYTES` | `1073741824` | 单文件上传上限，默认 1 GiB |
@@ -489,6 +615,11 @@ PWA 用于安装应用和缓存应用壳，不表示默认离线保存文件内�
 | `TRUST_PROXY` | `false` | `false`、`true`、代理跳数或 Fastify 支持的字符串值 |
 | `LOG_LEVEL` | `info` | `fatal`、`error`、`warn`、`info`、`debug`、`trace` 或 `silent` |
 | `LOG_FILE` | 未设置 | 可选 pino 日志文件路径，会自动创建父目录 |
+| `RATE_LIMIT_ENABLED` | 生产为 `true`，开发/测试为 `false` | 登录、注册、改密、重置密码限流开关 |
+| `RATE_LIMIT_MAX` | `5` | 单个限流窗口内允许的最大尝试次数 |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | 限流窗口长度（毫秒） |
+| `REGISTRATION_ENABLED` | `true` | 是否开放自助注册；`false` 时仅邀请码可注册 |
+| `BACKUP_DIR` | `./backups` | `npm run backup` 的备份根目录，默认保留最近 7 份 |
 
 生产环境必须显式设置 `NODE_ENV=production`、`ADMIN_USERNAME` 和至少 12 字节的 `ADMIN_PASSWORD`。修改已有管理员的环境变量不会覆盖数据库中已有账号的密码。
 
@@ -531,7 +662,7 @@ npm run typecheck
 npm test
 ```
 
-测试覆盖服务端配置、数据库迁移、文件服务、API 集成流程以及前端格式化函数。
+测试覆盖服务端配置、数据库迁移、文件服务、ACL 权限矩阵、分享五要素、动态水印、上传白名单、只读不可下载、限流、配额、审计、备份脚本、API 集成流程以及前端格式化函数；v0.1.2 已在 Node.js 22 和 Node.js 24 环境分别验证 typecheck 与完整测试套件。
 
 ### 构建和运行生产版本
 
@@ -608,53 +739,50 @@ WantedBy=multi-user.target
 
 ## 备份与恢复
 
-当前仓库没有内置备份脚本。SQLite 数据库和本地对象目录必须同时备份，只备份其中一个无法完整恢复文件。
+仓库提供内置备份脚本：
 
-建议备份：
-
-```text
-data/db/local-file-hub.sqlite
-data/objects/
+```bash
+npm run backup
 ```
 
-生产环境应：
+脚本默认读取 `DATA_DIR` / `DB_PATH` / `OBJECT_DIR`，在 `BACKUP_DIR` 下创建带时间戳的备份目录，并执行：
 
-1. 定期执行 SQLite 一致性检查。
-2. 使用 `sqlite3 .backup` 或等价方式创建一致性快照。
-3. 将数据库快照和 `objects/` 目录归档到独立磁盘。
-4. 定期执行恢复演练，而不只是检查备份文件是否存在。
-5. 在备份期间避免直接复制处于写入状态的数据库文件。
-6. 将 `uploads/` 视为临时目录，不把它当作持久数据备份目标。
+1. `PRAGMA integrity_check`，结果为 `ok` 才继续；
+2. 调用 `better-sqlite3` 的在线 `backup()`，生成与 WAL 一致的 SQLite 快照；
+3. 递归归档 `objects/` 中的文件内容，跳过符号链接；
+4. 不包含 `uploads/` 临时目录；
+5. 自动清理旧目录，默认只保留最近 7 份。
+
+完整恢复必须同时使用备份目录中的 `local-file-hub.sqlite` 和 `objects/`。生产环境仍应定期执行恢复演练、把备份复制到独立磁盘，并确保备份目录和数据库目录的访问权限受到限制。
 
 ## 项目阶段
 
-### 已完成：可用文件共享与管理
+### 已完成：v0.1.2 核心能力
 
-- 注册、登录、会话管理、密码修改和管理员权限分配。
-- 用户创建、停用、删除、批量操作、密码重置、角色变更和邀请链接。
-- 文件上传、列表、搜索、筛选、排序、分页、预览、下载和管理。
-- 图片、音频、视频、PDF 和纯文本预览。
-- SQLite 元数据、本地对象存储、Range 流式传输和启动清理。
-- 用户活动日志和按用户查询界面。
-- 响应式 React/PWA 前端和生产环境 Service Worker。
+- 文件与文件夹条目级六维 ACL、继承、指定员工权限管理和管理员绕过。
+- 匿名公开分享链接：限时、限次、访问密码、撤销和分享溯源水印。
+- 动态身份水印、图像预览/下载水印和 Markdown 导出 PDF 水印。
+- 登录/注册/改密/重置密码限流、安全响应头和注册保护。
+- 上传扩展名白名单、只读不可下载 403、下载与分享访问审计。
+- 管理员水印配置 API/界面、用户配额 API/界面和全局审计 CSV。
+- `npm run backup` 内置在线备份脚本。
+- Node.js 22 / Node.js 24 双环境 typecheck 与 11 个测试文件、61 个用例全绿。
 
 ### 下一步：稳定性和易用性
 
 - 分片上传、断点续传和上传任务持久化。
-- 管理员存储配额配置界面/API。
+- 缩略图生成、音视频转码和更完善的媒体工作流。
 - 更完善的移动端、弱网和批量文件操作。
-- 数据库及对象存储备份脚本。
-- 全局活动审计、导出和保留策略。
+- 下载审批流、敏感目录标记、多因子认证和设备管理。
 
 ### 按需扩展
 
 - 用户手动离线收藏小文件。
-- 可选缩略图生成和媒体转码。
-- 文件夹级权限和公开分享链接。
-- 更细粒度的操作审计和合规策略。
+- 分布式对象存储和跨区域同步。
+- 更细粒度的操作审计、保留策略和合规策略。
 
 ## 当前版本说明
 
-当前包版本为 `0.1.1`，已有 Git 标签为 `v0.1.0` 和 `v0.1.1`；发布分支为 `master`。本次文档同步以 [`VERSION.md`](VERSION.md) 记录的 v0.1.1 基线为准。
+当前项目版本锁定为 `0.1.2`；尚未创建发布标签或执行 npm 发布。已发布历史版本为 `0.1.1`。版本基线与工作区状态见 [`VERSION.md`](VERSION.md)。
 
-生产部署前必须修改管理员账号和密码。首次启动会创建管理员；后续修改环境变量不会覆盖数据库中已有账号的密码。
+生产部署前必须修改管理员账号和密码，并在发布前完成人工测试。首次启动会创建管理员；后续修改环境变量不会覆盖数据库中已有账号的密码。
