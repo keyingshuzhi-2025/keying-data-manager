@@ -1,6 +1,6 @@
 # 权限体系文档（v0.1.2 · 条目级继承 ACL）
 
-> 当前项目版本：`0.1.2`。本文档描述文件/文件夹条目 ACL、员工授权及其继承行为。
+> 当前项目版本：`0.1.3`。本文档描述文件/文件夹条目 ACL、员工授权及其继承行为。
 
 ---
 
@@ -100,14 +100,14 @@ CREATE TABLE item_permissions (
 
 ## 4. 迁移（schema v8，db/database.ts）
 
-项目版本 `0.1.2` 当前使用 SQLite schema `user_version = 8`。v7 迁移创建 `folder_permissions` 并种子 ROOT；v8 增加 `item_permissions` 和 `users.can_manage_permissions`：
+项目版本 `0.1.3` 当前使用 SQLite schema `user_version = 8`。v7 迁移创建 `folder_permissions` 并种子 ROOT；v8 增加 `item_permissions` 和 `users.can_manage_permissions`：
 
 1. 每次启动幂等确保 `folder_permissions` 与 ROOT 默认策略存在；
 2. 写入 `app_config.folder_permissions_default_mode = 'open'`（不覆盖已有值）；
 3. schema 创建 `item_permissions`，用户表迁移增加 `can_manage_permissions`；
 4. 构造函数完成全部迁移后设置 `PRAGMA user_version = 8`。
 
-`user_version` 是 SQLite schema 版本，不等同于应用包版本 `0.1.2`。
+`user_version` 是 SQLite schema 版本，不等同于应用包版本 `0.1.3`。
 
 ---
 
