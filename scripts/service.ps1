@@ -1,59 +1,68 @@
-# ============================================================
-# Local File Hub service control script (start / stop on demand)
-# Usage:
-#   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 start
-#   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 stop
-#   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 restart
-#   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 status
-#   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 uninstall
-# ============================================================
-$ErrorActionPreference = 'Stop'
-$action = $args[0]
-$serviceName = 'LocalFileHub'
+# Control the Local File Hub Windows service.
+# Usage: powershell -ExecutionPolicy Bypass -File scripts\service.ps1 <start|stop|restart|status|uninstall>
+param([string]$Action)
 
-# Elevate for privileged actions (start/stop/restart/uninstall need Administrator)
+$ErrorActionPreference = 'Stop'
+$serviceName = 'LocalFileHub'
+$Action = $Action.ToLowerInvariant()
+
+if ($Action -notin @('start', 'stop', 'restart', 'status', 'uninstall')) {
+    Write-Host 'Usage: service.ps1 <start|stop|restart|status|uninstall>'
+    exit 2
+}
+
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if ($action -ne 'status' -and -not $isAdmin) {
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $action"
-    exit 0
+if ($Action -ne 'status' -and -not $isAdmin) {
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $Action"
+    $child = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList $arguments
+    exit $child.ExitCode
 }
 
-switch ($action) {
+$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $service) {
+    Write-Host "Service $serviceName is not installed."
+    if ($Action -eq 'status') { exit 3 }
+    exit 1
+}
+
+switch ($Action) {
     'start' {
-        sc.exe start $serviceName
-        Start-Sleep -Seconds 2
-        sc.exe query $serviceName | Select-String 'STATE'
-    }
-    'stop' {
-        sc.exe stop $serviceName
-        Start-Sleep -Seconds 2
-        sc.exe query $serviceName | Select-String 'STATE'
-    }
-    'restart' {
-        sc.exe stop $serviceName
-        Start-Sleep -Seconds 2
-        sc.exe start $serviceName
-        Start-Sleep -Seconds 2
-        sc.exe query $serviceName | Select-String 'STATE'
-    }
-    'status' {
-        $q = sc.exe query $serviceName 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Service $serviceName is not installed."
-        } else {
-            $q | Select-String 'STATE|SERVICE_NAME'
+        if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+            Start-Service -Name $serviceName
+            $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
         }
     }
-    'uninstall' {
-        sc.exe stop $serviceName 2>$null | Out-Null
-        Start-Sleep -Seconds 1
-        sc.exe delete $serviceName
-        Write-Host "Service $serviceName uninstalled."
+    'stop' {
+        if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+            Stop-Service -Name $serviceName -Force
+            $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(30))
+        }
     }
-    default {
-        Write-Host 'Usage: service.ps1 <start|stop|restart|status|uninstall>'
-        exit 1
+    'restart' {
+        if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+            Stop-Service -Name $serviceName -Force
+            $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(30))
+        }
+        Start-Service -Name $serviceName
+        $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
+    }
+    'status' {
+        $service.Refresh()
+        Write-Host "${serviceName}: $($service.Status)"
+        exit 0
+    }
+    'uninstall' {
+        if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+            Stop-Service -Name $serviceName -Force
+            $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(30))
+        }
+        & sc.exe delete $serviceName
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Host "Service $serviceName removed. Windows may finish deleting it after open handles close."
+        exit 0
     }
 }
+
+$service.Refresh()
+Write-Host "${serviceName}: $($service.Status)"
