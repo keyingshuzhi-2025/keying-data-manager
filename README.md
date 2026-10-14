@@ -683,6 +683,19 @@ npm run start
 
 ## 生产部署
 
+### Windows 服务
+
+在项目目录安装依赖并配置生产环境 `.env`（设置管理员用户名和至少 12 字节的强密码）后，以管理员 PowerShell 运行：
+
+```powershell
+npm ci
+powershell -ExecutionPolicy Bypass -File .\scripts\install-service.ps1
+```
+
+安装脚本会构建生产版应用、编译 Windows 服务包装器，并创建或更新 `LocalFileHub` 服务。要求 Node.js 22.12+ 和 .NET Framework 4.x。服务日志写入 `logs\service.out.log`、`logs\service.err.log`；应用日志路径由 `.env` 中的 `LOG_FILE` 决定。
+
+安装后可使用 `powershell -ExecutionPolicy Bypass -File .\scripts\service.ps1 status` 查看服务状态；支持 `start`、`stop`、`restart` 和 `uninstall`。
+
 ### 手动部署
 
 推荐：
